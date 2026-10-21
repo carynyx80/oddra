@@ -158,7 +158,7 @@ export default function LivePage() {
               {phase === "betting" || phase === "upcoming" ? (
                 <div className="pointer-events-none absolute inset-x-0 bottom-3 text-center">
                   <span className="rounded-md bg-black/70 px-3 py-1.5 text-[12px] text-muted backdrop-blur">
-                    Line-ups · kickoff in {clock ?? "–"}
+                    Line-ups · {phase === "upcoming" ? "betting opens" : "kickoff"} in {clock ?? "–"}
                   </span>
                 </div>
               ) : null}

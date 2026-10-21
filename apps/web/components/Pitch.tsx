@@ -23,8 +23,24 @@ export function kits(cfg: MatchConfig): [string, string] {
   return [home, away];
 }
 
-/** Goalkeeper shirts: fixed, and distinct from every outfield kit in the league. */
-const GK: [string, string] = ["#F2D14B", "#C77DFF"];
+const GK_CANDIDATES = ["#F2D14B", "#C77DFF", "#00E0FF", "#FF7AC6", "#FF8A3D", "#9BE15D"];
+
+/** Goalkeeper shirts: the candidates that differ most from both outfield kits (and from each other). */
+export function keeperKits(kitsUsed: [string, string]): [string, string] {
+  const pickFar = (avoid: string[]) =>
+    GK_CANDIDATES.reduce((best, c) => {
+      const d = Math.min(...avoid.map((a) => colourDistance(a, c)));
+      const bd = Math.min(...avoid.map((a) => colourDistance(a, best)));
+      return d > bd ? c : best;
+    }, GK_CANDIDATES[0]);
+  const home = pickFar(kitsUsed);
+  return [home, pickFar([...kitsUsed, home])];
+}
+
+const luminance = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return r * 0.299 + g * 0.587 + b * 0.114;
+};
 
 const textOn = (hex: string) => {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -147,6 +163,7 @@ export function Pitch({
       drawPitch();
       if (cfg) {
         const [homeKit, awayKit] = kits(cfg);
+        const GK = keeperKits([homeKit, awayKit]);
         let get: (k: number) => number;
         let owner = -1;
         if (res) {
@@ -174,7 +191,9 @@ export function Pitch({
           ctx.fillStyle = isGk ? GK[k < 11 ? 0 : 1] : kit;
           ctx.fill();
           ctx.lineWidth = Math.max(1, 0.18 * scale);
-          ctx.strokeStyle = "rgba(0,0,0,0.65)";
+          // dark shirts get a light outline so they stand out on the dark pitch
+          ctx.strokeStyle =
+            luminance(isGk ? GK[k < 11 ? 0 : 1] : kit) < 95 ? "rgba(255,255,255,0.75)" : "rgba(0,0,0,0.65)";
           ctx.stroke();
           if (k === owner) {
             ctx.beginPath();
