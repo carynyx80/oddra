@@ -16,3 +16,4 @@ playwright-report
 .pgdata
 *.log
 .DS_Store
+contracts/deployments/31337.json
