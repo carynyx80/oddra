@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
+import {
+    AccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 import {OddraMarkets} from "./OddraMarkets.sol";
 
 /// @notice L2 block numbers and hashes. On Robinhood Chain (Arbitrum Orbit) this is the ArbSys precompile at 0x64,
@@ -76,7 +78,9 @@ contract OddraMatchRegistry is AccessControlDefaultAdminRules {
     );
     event MatchLocked(uint256 indexed matchId, uint64 entropyBlock);
     event MatchRevealed(uint256 indexed matchId, bytes32 serverSeed, bytes32 entropy, bytes32 finalSeed);
-    event MatchSettled(uint256 indexed matchId, uint8 homeGoals, uint8 awayGoals, uint8 firstScorer, bytes32 resultHash);
+    event MatchSettled(
+        uint256 indexed matchId, uint8 homeGoals, uint8 awayGoals, uint8 firstScorer, bytes32 resultHash
+    );
     event MatchVoided(uint256 indexed matchId, Status previous);
 
     error BadStatus(Status actual);

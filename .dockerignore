@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.pgdata
+contracts/out
+contracts/cache
+contracts/lib
+.env*
+!.env.example

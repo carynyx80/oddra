@@ -33,7 +33,8 @@ contract Deploy is Script {
         if (testToken) usdgAddr = address(new OddraTestUSDG());
         IERC20 usdg = IERC20(usdgAddr);
 
-        IBlockSource blocks = block.chainid == 31337 ? IBlockSource(address(new NativeBlockSource())) : IBlockSource(ARBSYS);
+        IBlockSource blocks =
+            block.chainid == 31337 ? IBlockSource(address(new NativeBlockSource())) : IBlockSource(ARBSYS);
         OddraMatchRegistry registry = new OddraMatchRegistry(deployer, blocks);
         OddraTreasury treasury = new OddraTreasury(deployer, usdg);
         OddraRiskManager risk = new OddraRiskManager(

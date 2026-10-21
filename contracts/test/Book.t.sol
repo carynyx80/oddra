@@ -107,14 +107,31 @@ contract BookTest is Base {
 
     function test_SettlesAllSixMarkets() public {
         openMatch(1, flatOdds(300));
-        uint8[13] memory sels = [HOME, DRAW, AWAY, HOME_OR_DRAW, HOME_OR_AWAY, DRAW_OR_AWAY, OVER, UNDER, BTTS_YES, BTTS_NO, FIRST_HOME, FIRST_AWAY, FIRST_NONE];
+        uint8[13] memory sels = [
+            HOME,
+            DRAW,
+            AWAY,
+            HOME_OR_DRAW,
+            HOME_OR_AWAY,
+            DRAW_OR_AWAY,
+            OVER,
+            UNDER,
+            BTTS_YES,
+            BTTS_NO,
+            FIRST_HOME,
+            FIRST_AWAY,
+            FIRST_NONE
+        ];
         uint256[13] memory ids;
-        for (uint256 i = 0; i < 13; i++) ids[i] = bet(alice, 1, sels[i], 1 * U);
+        for (uint256 i = 0; i < 13; i++) {
+            ids[i] = bet(alice, 1, sels[i], 1 * U);
+        }
         uint256 csWin = bet(alice, 1, cs(2, 1), 1 * U);
         uint256 csLose = bet(alice, 1, cs(1, 2), 1 * U);
         uint256 other = bet(alice, 1, CS_OTHER, 1 * U);
         finish(1, 2, 1, 2); // 2-1, away scored first
-        bool[13] memory expectWin = [true, false, false, true, true, false, true, false, true, false, false, true, false];
+        bool[13] memory expectWin =
+            [true, false, false, true, true, false, true, false, true, false, false, true, false];
         for (uint256 i = 0; i < 13; i++) {
             OddraBook.BetStatus s = book.betStatus(ids[i]);
             if (i == 0) {
@@ -362,7 +379,9 @@ contract BookTest is Base {
         a = uint8(bound(a, 0, 6));
         uint8 first = h + a == 0 ? 0 : (h == 0 ? 2 : a == 0 ? 1 : uint8(1 + (seed % 2)));
         uint32[30] memory o;
-        for (uint256 i = 0; i < 30; i++) o[i] = uint32(101 + (uint256(keccak256(abi.encode(seed, i))) % 3000));
+        for (uint256 i = 0; i < 30; i++) {
+            o[i] = uint32(101 + (uint256(keccak256(abi.encode(seed, i))) % 3000));
+        }
         openMatch(1, o);
         uint256 n = 12;
         uint256[] memory ids = new uint256[](n);

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
+import {
+    AccessControlDefaultAdminRules
+} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -79,7 +81,12 @@ contract OddraFeeCollector is AccessControlDefaultAdminRules, ReentrancyGuard {
     }
 
     /// @notice Convert ETH to USDG through the configured adapter, with a keeper-supplied minimum output.
-    function convert(uint256 ethAmount, uint256 minOut) external onlyRole(KEEPER_ROLE) nonReentrant returns (uint256 out) {
+    function convert(uint256 ethAmount, uint256 minOut)
+        external
+        onlyRole(KEEPER_ROLE)
+        nonReentrant
+        returns (uint256 out)
+    {
         if (address(swapAdapter) == address(0)) revert NoAdapter();
         uint256 before = usdg.balanceOf(address(this));
         swapAdapter.swapEthForUsdg{value: ethAmount}(minOut, address(this));

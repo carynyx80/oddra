@@ -21,19 +21,46 @@ contract RegistryTest is Base {
     function test_CannotCommitAfterBettingOpened() public {
         vm.prank(operator);
         vm.expectRevert(OddraMatchRegistry.BadSchedule.selector);
-        registry.createMatch(1, 1, 2, CONFIG, RULES, keccak256(abi.encodePacked(SEED)), uint64(block.timestamp - 1), uint64(block.timestamp + 300));
+        registry.createMatch(
+            1,
+            1,
+            2,
+            CONFIG,
+            RULES,
+            keccak256(abi.encodePacked(SEED)),
+            uint64(block.timestamp - 1),
+            uint64(block.timestamp + 300)
+        );
     }
 
     function test_OnlyOperatorCreates() public {
         vm.expectRevert();
-        registry.createMatch(1, 1, 2, CONFIG, RULES, keccak256(abi.encodePacked(SEED)), uint64(block.timestamp + 1), uint64(block.timestamp + 301));
+        registry.createMatch(
+            1,
+            1,
+            2,
+            CONFIG,
+            RULES,
+            keccak256(abi.encodePacked(SEED)),
+            uint64(block.timestamp + 1),
+            uint64(block.timestamp + 301)
+        );
     }
 
     function test_NoDuplicateMatch() public {
         openMatch(1, flatOdds(200));
         vm.prank(operator);
         vm.expectRevert(OddraMatchRegistry.AlreadyExists.selector);
-        registry.createMatch(1, 3, 4, CONFIG, RULES, keccak256(abi.encodePacked(SEED)), uint64(block.timestamp + 1), uint64(block.timestamp + 301));
+        registry.createMatch(
+            1,
+            3,
+            4,
+            CONFIG,
+            RULES,
+            keccak256(abi.encodePacked(SEED)),
+            uint64(block.timestamp + 1),
+            uint64(block.timestamp + 301)
+        );
     }
 
     function test_LockOnlyAfterKickoff() public {
@@ -78,7 +105,9 @@ contract RegistryTest is Base {
         vm.prank(operator);
         registry.settle(1, 1, 0, 1, keccak256("r"));
         vm.prank(operator);
-        vm.expectRevert(abi.encodeWithSelector(OddraMatchRegistry.BadStatus.selector, OddraMatchRegistry.Status.Settled));
+        vm.expectRevert(
+            abi.encodeWithSelector(OddraMatchRegistry.BadStatus.selector, OddraMatchRegistry.Status.Settled)
+        );
         registry.settle(1, 0, 1, 2, keccak256("r2"));
     }
 

@@ -103,7 +103,9 @@ abstract contract Base is Test {
     }
 
     function flatOdds(uint32 o) internal pure returns (uint32[30] memory a) {
-        for (uint256 i = 0; i < 30; i++) a[i] = o;
+        for (uint256 i = 0; i < 30; i++) {
+            a[i] = o;
+        }
     }
 
     /// @dev Creates match `id` opening now (+1s) with a 300s window, and publishes odds.

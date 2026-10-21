@@ -556,10 +556,29 @@ export class Scheduler {
     }
   }
 
+  private readonly alerted = new Map<string, number>();
+
   recordError(id: bigint, step: string, e: unknown) {
     const error = errMsg(e);
     log.warn("step failed", { matchId: id, step, error });
     this.status.errors.unshift({ at: this.status.chainTime, matchId: id.toString(), step, error: error.slice(0, 300) });
     this.status.errors.length = Math.min(this.status.errors.length, 25);
+    // raise an operational alert at most every 5 minutes per (match, step)
+    const key = `${id}:${step}`;
+    if (Date.now() - (this.alerted.get(key) ?? 0) < 300_000) return;
+    this.alerted.set(key, Date.now());
+    const message = `match ${id} · ${step}: ${error.slice(0, 300)}`;
+    const level = step === "simulate" ? "critical" : "warn";
+    if (hasDatabase())
+      void db()
+        .alert.create({ data: { level, source: "scheduler", message } })
+        .catch(() => {});
+    if (this.env.alertWebhook)
+      void fetch(this.env.alertWebhook, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: `[oddra ${level}] ${message}`, level, matchId: id.toString(), step }),
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => {});
   }
 }
