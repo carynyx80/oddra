@@ -1,0 +1,41 @@
+{
+  "name": "@oddra/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint app components lib",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@oddra/db": "*",
+    "@oddra/engine": "*",
+    "@oddra/shared": "*",
+    "@rainbow-me/rainbowkit": "2.2.11",
+    "@tanstack/react-query": "5.104.5",
+    "clsx": "2.1.1",
+    "framer-motion": "14.5.0",
+    "geist": "1.8.1",
+    "next": "15.5.28",
+    "react": "19.1.10",
+    "react-dom": "19.1.10",
+    "server-only": "0.0.1",
+    "tailwind-merge": "3.7.0",
+    "viem": "2.57.7",
+    "wagmi": "2.19.5",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.7",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.5",
+    "@types/react": "19.1.17",
+    "@types/react-dom": "19.1.11",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.28",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
