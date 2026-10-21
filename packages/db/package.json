@@ -1,0 +1,27 @@
+{
+  "name": "@oddra/db",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "seed": "tsx src/seed.ts",
+    "pg:local": "tsx src/local-postgres.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@oddra/engine": "*",
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "embedded-postgres": "17.10.0-beta.17",
+    "prisma": "6.19.3",
+    "tsx": "4.23.15"
+  }
+}

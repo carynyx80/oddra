@@ -1,0 +1,408 @@
+// Oddra database. The chain is authoritative for money: every financial row here is an index of an on-chain event,
+// keyed by (txHash, logIndex), and is rebuilt from the chain if it ever disagrees.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- people
+
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  wallets   Wallet[]
+  settings  Json     @default("{}")
+}
+
+model Wallet {
+  address     String    @id // lowercase 0x address
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  /// Off-chain compliance hooks (age / jurisdiction attestation, KYC provider reference). Never stores documents.
+  ageConfirmedAt   DateTime?
+  jurisdiction     String?
+  kycReference     String?
+  bets        Bet[]
+  claims      Claim[]
+}
+
+// ---------------------------------------------------------------- football
+
+model Team {
+  id        Int      @id // engine team id (0..19)
+  name      String
+  short     String
+  kitHome   String
+  kitAway   String
+  formation String
+  rating    Int
+  players   Player[]
+  homeMatches Match[] @relation("home")
+  awayMatches Match[] @relation("away")
+}
+
+model Player {
+  id      Int    @id @default(autoincrement())
+  teamId  Int
+  team    Team   @relation(fields: [teamId], references: [id])
+  slot    Int
+  number  Int
+  name    String
+  role    String
+  attrs   Json
+  version String // ENGINE_VERSION the attributes belong to
+
+  @@unique([teamId, slot, version])
+}
+
+enum MatchStatus {
+  NONE
+  SCHEDULED
+  LOCKED
+  REVEALED
+  SETTLED
+  VOIDED
+}
+
+model Match {
+  id           BigInt      @id // = slot number = on-chain match id
+  homeTeamId   Int
+  awayTeamId   Int
+  homeTeam     Team        @relation("home", fields: [homeTeamId], references: [id])
+  awayTeam     Team        @relation("away", fields: [awayTeamId], references: [id])
+  openTime     DateTime
+  kickoff      DateTime
+  fullTime     DateTime
+  status       MatchStatus @default(SCHEDULED)
+  engineVersion String
+  configHash   String
+  rulesetHash  String
+  seedCommit   String
+  entropyBlock BigInt?
+  entropy      String?
+  serverSeed   String?
+  finalSeed    String?
+  homeGoals    Int?
+  awayGoals    Int?
+  firstScorer  Int? // 0 none, 1 home, 2 away
+  resultHash   String?
+  eventLogHash String?
+  /// The worker's own replay of the revealed seed; must equal resultHash before settlement.
+  verifiedAt   DateTime?
+  bookSettled  Boolean     @default(false)
+  createdTx    String?
+  settledTx    String?
+  updatedAt    DateTime    @updatedAt
+  config       MatchConfig?
+  events       MatchEvent[]
+  stats        MatchStat[]
+  oddsSnapshots OddsSnapshot[]
+  markets      BettingMarket[]
+  bets         Bet[]
+  replay       MatchReplay?
+
+  @@index([status])
+  @@index([kickoff])
+}
+
+model MatchConfig {
+  matchId BigInt @id
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  json    Json // canonical config committed by configHash
+}
+
+/// Key events (everything except routine passes), for querying and the timeline.
+model MatchEvent {
+  matchId BigInt
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  seq     Int
+  tick    Int
+  type    String
+  team    Int
+  player  Int
+  other   Int
+  ok      Boolean
+  x       Float
+  y       Float
+  home    Int
+  away    Int
+
+  @@id([matchId, seq])
+  @@index([matchId, type])
+}
+
+/// The full event log, stored once per match for replays.
+model MatchReplay {
+  matchId BigInt @id
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  events  Json
+}
+
+model MatchStat {
+  matchId BigInt
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team    Int // 0 home, 1 away
+  goals          Int
+  shots          Int
+  shotsOnTarget  Int
+  corners        Int
+  fouls          Int
+  saves          Int
+  passes         Int
+  passesCompleted Int
+  tackles        Int
+  interceptions  Int
+  possession     Float
+
+  @@id([matchId, team])
+}
+
+// ---------------------------------------------------------------- betting
+
+model BettingMarket {
+  matchId   BigInt
+  match     Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  selection Int // 0..29, on-chain id
+  market    String
+  label     String
+  probability Float
+  won       Boolean?
+
+  @@id([matchId, selection])
+}
+
+model OddsSnapshot {
+  id        Int      @id @default(autoincrement())
+  matchId   BigInt
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  version   Int // book.oddsVersion
+  odds      Int[] // decimal × 100
+  reason    String // "initial" | "exposure"
+  txHash    String?
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, version])
+}
+
+enum BetState {
+  OPEN
+  WON
+  LOST
+  REFUND
+  PAID
+}
+
+model Bet {
+  id        BigInt   @id // on-chain bet id
+  matchId   BigInt
+  match     Match    @relation(fields: [matchId], references: [id])
+  bettor    String
+  wallet    Wallet   @relation(fields: [bettor], references: [address])
+  selection Int
+  stake     Decimal  @db.Decimal(38, 0) // USDG base units
+  odds      Int
+  payout    Decimal  @db.Decimal(38, 0)
+  state     BetState @default(OPEN)
+  txHash    String
+  logIndex  Int
+  blockNumber BigInt
+  placedAt  DateTime
+  settlement BetSettlement?
+  claims    Claim[]
+
+  @@unique([txHash, logIndex])
+  @@index([bettor])
+  @@index([matchId])
+  @@index([state])
+}
+
+model BetSettlement {
+  betId     BigInt   @id
+  bet       Bet      @relation(fields: [betId], references: [id])
+  won       Boolean
+  refund    Boolean
+  amountDue Decimal  @db.Decimal(38, 0)
+  settledAt DateTime @default(now())
+}
+
+model Claim {
+  id        Int      @id @default(autoincrement())
+  betId     BigInt
+  bet       Bet      @relation(fields: [betId], references: [id])
+  bettor    String
+  wallet    Wallet   @relation(fields: [bettor], references: [address])
+  amount    Decimal  @db.Decimal(38, 0)
+  caller    String
+  automatic Boolean
+  txHash    String
+  logIndex  Int
+  blockNumber BigInt
+  createdAt DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([bettor])
+}
+
+// ---------------------------------------------------------------- treasury and fees
+
+model TreasuryTransaction {
+  id          Int      @id @default(autoincrement())
+  kind        String // contribution | stake | payout | withdrawal | reserve | release
+  source      String?
+  account     String?
+  amount      Decimal  @db.Decimal(38, 0)
+  totalReservedAfter Decimal? @db.Decimal(38, 0)
+  txHash      String
+  logIndex    Int
+  blockNumber BigInt
+  createdAt   DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([kind, createdAt])
+}
+
+model CreatorFeeReceipt {
+  id          Int      @id @default(autoincrement())
+  asset       String // "ETH" | "USDG"
+  amount      Decimal  @db.Decimal(38, 0)
+  from        String?
+  txHash      String
+  logIndex    Int
+  blockNumber BigInt
+  createdAt   DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+model TokenConversion {
+  id          Int      @id @default(autoincrement())
+  ethIn       Decimal  @db.Decimal(38, 0)
+  usdgOut     Decimal  @db.Decimal(38, 0)
+  minOut      Decimal  @db.Decimal(38, 0)
+  txHash      String
+  logIndex    Int
+  blockNumber BigInt
+  createdAt   DateTime
+
+  @@unique([txHash, logIndex])
+}
+
+/// Hourly snapshots of on-chain treasury totals, for charts.
+model TreasurySnapshot {
+  id            Int      @id @default(autoincrement())
+  takenAt       DateTime @default(now())
+  blockNumber   BigInt
+  balance       Decimal  @db.Decimal(38, 0)
+  reserved      Decimal  @db.Decimal(38, 0)
+  totalStakes   Decimal  @db.Decimal(38, 0)
+  totalPayouts  Decimal  @db.Decimal(38, 0)
+  totalCreatorFees Decimal @db.Decimal(38, 0)
+  totalContributed Decimal @db.Decimal(38, 0)
+  totalWithdrawn Decimal @db.Decimal(38, 0)
+
+  @@index([takenAt])
+}
+
+// ---------------------------------------------------------------- operations
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// One row per (match, step). Steps are idempotent and re-derived from chain state, so a crashed job is simply retried.
+model SchedulerJob {
+  id        Int       @id @default(autoincrement())
+  matchId   BigInt
+  step      String // create | odds | lock | reveal | simulate | settle | settleBook | payout | void
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  lastError String?
+  txHash    String?
+  updatedAt DateTime  @updatedAt
+  createdAt DateTime  @default(now())
+
+  @@unique([matchId, step])
+  @@index([status])
+}
+
+model BlockchainTransaction {
+  hash      String   @id
+  purpose   String
+  matchId   BigInt?
+  from      String
+  to        String
+  nonce     Int?
+  status    String // sent | confirmed | reverted
+  gasUsed   BigInt?
+  blockNumber BigInt?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model ContractEvent {
+  txHash      String
+  logIndex    Int
+  blockNumber BigInt
+  contract    String
+  name        String
+  args        Json
+  createdAt   DateTime
+
+  @@id([txHash, logIndex])
+  @@index([name, blockNumber])
+}
+
+model IndexerCursor {
+  id        String   @id // "main"
+  block     BigInt
+  updatedAt DateTime @updatedAt
+}
+
+model WorkerHeartbeat {
+  id        String   @id // worker instance id
+  role      String
+  startedAt DateTime
+  beatAt    DateTime
+  chainTime DateTime?
+  info      Json     @default("{}")
+}
+
+model AdminAuditLog {
+  id        Int      @id @default(autoincrement())
+  actor     String
+  action    String
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
+}
+
+model AdminNonce {
+  nonce     String   @id
+  address   String
+  expiresAt DateTime
+  usedAt    DateTime?
+}
+
+model Alert {
+  id        Int      @id @default(autoincrement())
+  level     String // info | warn | critical
+  source    String
+  message   String
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([resolved, createdAt])
+}
