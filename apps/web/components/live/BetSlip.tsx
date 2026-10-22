@@ -5,27 +5,40 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { BaseError, ContractFunctionRevertedError, type Hash } from "viem";
 import { useAccount, useChainId, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
-import { SELECTIONS, MARKETS, formatOdds, oddraBookAbi, oddraTestUSDGAbi } from "@oddra/shared";
+import {
+  SELECTIONS,
+  MARKETS,
+  formatOdds,
+  oddraBookAbi,
+  oddraTestUSDGAbi,
+  parseAmount,
+  type AssetKey,
+} from "@oddra/shared";
 import { Button, Card, CardHeader, ExtLink } from "@/components/ui/primitives";
-import { chain, deployment, txUrl } from "@/lib/config";
-import { useUsdg } from "@/lib/hooks";
+import { chain, deployment, isMainnet, txUrl, usdgSymbol } from "@/lib/config";
+import { useLimits, useUsdg } from "@/lib/hooks";
 import { useSlip } from "@/lib/slip";
-import { fmtUsdg, parseUsdg } from "@/lib/utils";
+import { cn, fmtAsset } from "@/lib/utils";
 
 const FRIENDLY: Record<string, string> = {
   MarketClosed: "Betting on this match has closed.",
   OddsChanged: "The price moved. Re-select the market to take the new odds.",
   OddsUnavailable: "This selection is suspended.",
   StakeOutOfRange: "Stake is outside the allowed range.",
+  BadStake: "Enter a stake.",
   PayoutTooHigh: "Potential payout is above the current limit. Try a smaller stake.",
   SelectionLiabilityTooHigh: "This selection has reached its liability limit.",
   MatchLiabilityTooHigh: "This match has reached its liability limit.",
   TotalLiabilityTooHigh: "The treasury cannot take more risk right now.",
   ReserveBreached: "The treasury cannot cover this bet right now.",
+  AssetNotEnabled: "Betting in this asset is not enabled.",
   Excluded: "You have self-excluded from betting.",
+  NotEligible: "This wallet is not eligible to bet.",
   DailyLimitExceeded: "This bet would exceed your daily stake limit.",
   EnforcedPause: "Betting is paused.",
   FaucetCooldown: "The faucet can be used once per hour.",
+  BadBond: "The dispute bond amount is wrong.",
+  TooLate: "The dispute window has closed.",
 };
 
 export function explain(e: unknown): string {
@@ -34,13 +47,18 @@ export function explain(e: unknown): string {
     const name = revert?.data?.errorName;
     if (name && FRIENDLY[name]) return FRIENDLY[name];
     if (/User rejected|denied/i.test(e.shortMessage ?? e.message)) return "You rejected the request in your wallet.";
-    if (/insufficient funds/i.test(e.message)) return `Not enough ${chain.nativeCurrency.symbol} for gas.`;
+    if (/insufficient funds/i.test(e.message))
+      return `Not enough ${chain.nativeCurrency.symbol} for this transaction and its gas.`;
     return e.shortMessage || e.message;
   }
   return e instanceof Error ? e.message : String(e);
 }
 
 type Step = "idle" | "approving" | "placing" | "done" | "error";
+
+const QUICK: Record<AssetKey, string[]> = { USDG: ["5", "25", "100"], ETH: ["0.001", "0.005", "0.01"] };
+/** ETH kept back for gas when betting "max". */
+const GAS_RESERVE = 2n * 10n ** 14n;
 
 export function BetSlip({
   open,
@@ -54,13 +72,15 @@ export function BetSlip({
   awayName: string;
 }) {
   const { pick, stake, setStake, setPick } = useSlip();
+  const [asset, setAsset] = useState<AssetKey>("USDG");
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChain, isPending: switching } = useSwitchChain();
   const { openConnectModal } = useConnectModal();
   const client = usePublicClient();
   const qc = useQueryClient();
-  const usdg = useUsdg(address);
+  const wallet = useUsdg(address);
+  const limits = useLimits();
   const { writeContractAsync } = useWriteContract();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -70,16 +90,26 @@ export function BetSlip({
     setStep("idle");
     setError(null);
     setTx(null);
-  }, [pick?.matchId, pick?.selection]);
+  }, [pick?.matchId, pick?.selection, asset]);
 
+  const decimals = asset === "ETH" ? 18 : 6;
   const sel = pick ? SELECTIONS[pick.selection] : null;
   const live = pick && currentOdds ? currentOdds[pick.selection] : null;
   const moved = pick && live !== null && live !== pick.odds;
-  const amount = parseUsdg(stake);
+  const amount = parseAmount(stake, decimals);
   const payout = amount && pick ? (amount * BigInt(pick.odds)) / 100n : null;
-  const balance = usdg.data?.balance ?? 0n;
-  const needsApproval = amount !== null && (usdg.data?.allowance ?? 0n) < amount;
+  const balance = asset === "ETH" ? (wallet.data?.eth ?? 0n) : (wallet.data?.balance ?? 0n);
+  const lim = limits.data?.[asset];
+  const needsApproval = asset === "USDG" && amount !== null && (wallet.data?.allowance ?? 0n) < amount;
   const wrongChain = isConnected && chainId !== chain.id;
+  const outOfRange = amount !== null && lim ? amount < lim.minStake || amount > lim.maxStake : false;
+  const short = amount !== null && (asset === "ETH" ? balance < amount + GAS_RESERVE / 4n : balance < amount);
+  const symbol = asset === "ETH" ? "ETH" : usdgSymbol;
+
+  function switchAsset(a: AssetKey) {
+    setAsset(a);
+    setStake(QUICK[a][1]);
+  }
 
   async function wait(hash: Hash) {
     setTx(hash);
@@ -101,27 +131,40 @@ export function BetSlip({
     if (!pick || !amount) return;
     setError(null);
     try {
-      if (needsApproval) {
-        setStep("approving");
-        // approve exactly the stake, never an unlimited allowance
+      if (asset === "ETH") {
+        setStep("placing");
         await wait(
           await writeContractAsync({
-            address: deployment.usdg,
-            abi: oddraTestUSDGAbi,
-            functionName: "approve",
-            args: [deployment.book, amount],
+            address: deployment.book,
+            abi: oddraBookAbi,
+            functionName: "placeBetETH",
+            args: [pick.matchId, pick.selection, pick.odds],
+            value: amount,
+          }),
+        );
+      } else {
+        if (needsApproval) {
+          setStep("approving");
+          // approve exactly the stake, never an unlimited allowance
+          await wait(
+            await writeContractAsync({
+              address: deployment.usdg,
+              abi: oddraTestUSDGAbi,
+              functionName: "approve",
+              args: [deployment.book, amount],
+            }),
+          );
+        }
+        setStep("placing");
+        await wait(
+          await writeContractAsync({
+            address: deployment.book,
+            abi: oddraBookAbi,
+            functionName: "placeBet",
+            args: [pick.matchId, pick.selection, amount, pick.odds],
           }),
         );
       }
-      setStep("placing");
-      await wait(
-        await writeContractAsync({
-          address: deployment.book,
-          abi: oddraBookAbi,
-          functionName: "placeBet",
-          args: [pick.matchId, pick.selection, amount, pick.odds],
-        }),
-      );
       setStep("done");
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["usdg"] }),
@@ -176,18 +219,40 @@ export function BetSlip({
                 </div>
               ) : null}
             </div>
+
+            <div
+              className="grid grid-cols-2 gap-1 rounded-md border border-line bg-bg p-1"
+              role="radiogroup"
+              aria-label="Bet with"
+            >
+              {(["USDG", "ETH"] as const).map((a) => (
+                <button
+                  key={a}
+                  role="radio"
+                  aria-checked={asset === a}
+                  onClick={() => switchAsset(a)}
+                  className={cn(
+                    "rounded px-3 py-1.5 text-[13px] font-medium transition-colors",
+                    asset === a ? "bg-raised text-fg" : "text-muted hover:text-fg",
+                  )}
+                >
+                  {a === "USDG" ? usdgSymbol : "ETH"}
+                </button>
+              ))}
+            </div>
+
             <label className="block">
-              <span className="label">Stake (USDG)</span>
+              <span className="label">Stake ({symbol})</span>
               <div className="mt-1.5 flex items-center rounded-md border border-line bg-bg focus-within:border-accent/60">
                 <input
                   inputMode="decimal"
                   value={stake}
                   onChange={(e) => setStake(e.target.value.replace(",", "."))}
                   className="num h-11 w-full bg-transparent px-3 text-[16px] outline-none"
-                  aria-label="Stake in USDG"
+                  aria-label={`Stake in ${symbol}`}
                 />
                 <div className="flex gap-1 pr-2">
-                  {["5", "25", "100"].map((v) => (
+                  {QUICK[asset].map((v) => (
                     <button
                       key={v}
                       className="num rounded border border-line px-2 py-1 text-[11px] text-muted hover:text-fg"
@@ -198,17 +263,24 @@ export function BetSlip({
                   ))}
                 </div>
               </div>
+              {lim ? (
+                <span className="num mt-1 block text-[11px] text-muted">
+                  Limits {fmtAsset(lim.minStake, asset, false)}–{fmtAsset(lim.maxStake, asset, false)} {symbol} per bet
+                </span>
+              ) : null}
             </label>
             <dl className="num grid grid-cols-2 gap-y-1.5 text-[13px]">
               <dt className="text-muted">Potential payout</dt>
-              <dd className="text-right font-medium">{payout ? fmtUsdg(payout) : "–"}</dd>
+              <dd className="text-right font-medium">{payout ? fmtAsset(payout, asset) : "–"}</dd>
               <dt className="text-muted">Potential profit</dt>
-              <dd className="text-right text-pos">{payout && amount ? fmtUsdg(payout - amount) : "–"}</dd>
+              <dd className="text-right text-pos">{payout && amount ? fmtAsset(payout - amount, asset) : "–"}</dd>
               <dt className="text-muted">Wallet balance</dt>
-              <dd className="text-right">{isConnected ? fmtUsdg(balance) : "–"}</dd>
-              <dt className="text-muted">Approval</dt>
+              <dd className="text-right">{isConnected ? fmtAsset(balance, asset) : "–"}</dd>
+              <dt className="text-muted">{asset === "USDG" ? "Approval" : "Paid in"}</dt>
               <dd className="text-right">
-                {!isConnected || amount === null ? (
+                {asset === "ETH" ? (
+                  "native ETH"
+                ) : !isConnected || amount === null ? (
                   "–"
                 ) : needsApproval ? (
                   <span className="text-warn">Needed</span>
@@ -234,32 +306,40 @@ export function BetSlip({
               <Button className="w-full" disabled>
                 Betting closed
               </Button>
-            ) : amount !== null && balance < amount ? (
-              deployment.testToken ? (
+            ) : short ? (
+              asset === "USDG" && deployment.testToken ? (
                 <Button variant="primary" className="w-full" onClick={faucet}>
                   Get 1,000 test USDG
                 </Button>
               ) : (
                 <Button className="w-full" disabled>
-                  Insufficient USDG
+                  Insufficient {symbol}
                 </Button>
               )
             ) : (
               <Button
                 variant="primary"
                 className="w-full"
-                disabled={!amount || step === "approving" || step === "placing" || !!moved}
+                disabled={!amount || outOfRange || step === "approving" || step === "placing" || !!moved}
                 onClick={place}
               >
                 {step === "approving"
                   ? "Approving USDG…"
                   : step === "placing"
                     ? "Placing bet…"
-                    : needsApproval
-                      ? "Approve and place bet"
-                      : "Place bet"}
+                    : outOfRange
+                      ? "Stake outside limits"
+                      : needsApproval
+                        ? "Approve and place bet"
+                        : `Bet ${stake || "0"} ${symbol}`}
               </Button>
             )}
+            {isMainnet ? (
+              <p className="text-[11px] text-muted">
+                Real funds. Winnings are paid in the asset you stake. Results are final after a 10-minute dispute
+                window.
+              </p>
+            ) : null}
             {step === "done" ? (
               <p className="text-[13px] text-pos">Bet confirmed on-chain. Track it in My Bets.</p>
             ) : null}

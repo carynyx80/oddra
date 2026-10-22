@@ -10,7 +10,8 @@ import {
   keccakHex,
   resultHash,
 } from "@oddra/engine";
-import { phaseOf, slot } from "@oddra/shared";
+import { hasResult, phaseOf, slot } from "@oddra/shared";
+import { DisputePanel } from "@/components/live/DisputePanel";
 import { Pitch } from "@/components/Pitch";
 import { Markets } from "@/components/live/Markets";
 import { EventToast, MatchTabs, Momentum, PossessionBar } from "@/components/live/MatchCentre";
@@ -114,17 +115,18 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
         detail: revealed ? m.finalSeed : "awaiting reveal",
       },
       {
-        label: "Your browser's replay produces the settled result hash",
-        ok:
-          v.status !== "Settled"
-            ? null
-            : rh === null
-              ? null
-              : rh === m.resultHash && result!.homeGoals === m.homeGoals && result!.awayGoals === m.awayGoals,
-        detail:
+        label:
           v.status === "Settled"
-            ? `${m.resultHash}${rh && rh !== m.resultHash ? ` (replay: ${rh})` : ""}`
-            : "awaiting settlement",
+            ? "Your browser's replay produces the settled result hash"
+            : "Your browser's replay matches the proposed result",
+        ok: !hasResult(v.m.status)
+          ? null
+          : rh === null
+            ? null
+            : rh === m.resultHash && result!.homeGoals === m.homeGoals && result!.awayGoals === m.awayGoals,
+        detail: hasResult(v.m.status)
+          ? `${m.resultHash}${rh && rh !== m.resultHash ? ` (replay: ${rh})` : ""}`
+          : "awaiting the result",
       },
     ];
   }, [v, cfg, revealed, result]);
@@ -253,6 +255,7 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
         </div>
 
         <div className="space-y-4">
+          <DisputePanel match={v} replayAgrees={checks ? checks[checks.length - 1].ok : null} now={now} />
           <Card>
             <CardHeader title="Verification" right={<Badge tone="muted">computed in your browser</Badge>} />
             <ul className="divide-y divide-line">

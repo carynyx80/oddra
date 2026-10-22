@@ -5,12 +5,12 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAccount, useBalance, usePublicClient, useWriteContract } from "wagmi";
-import { oddraBookAbi } from "@oddra/shared";
+import { ETH_ADDRESS, oddraBookAbi, parseAmount, type AssetKey } from "@oddra/shared";
 import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat } from "@/components/ui/primitives";
-import { addressUrl, chain, deployment } from "@/lib/config";
+import { addressUrl, chain, deployment, usdgSymbol } from "@/lib/config";
 import { useChainNow, useMyBets, useUsdg } from "@/lib/hooks";
-import { fmtUsdg, parseUsdg, short } from "@/lib/utils";
+import { fmtAsset, fmtUsdg, short } from "@/lib/utils";
 
 const DURATIONS = [
   { label: "24 hours", s: 86_400 },
@@ -30,21 +30,28 @@ export default function ProfilePage() {
   const qc = useQueryClient();
   const { writeContractAsync } = useWriteContract();
   const [limit, setLimit] = useState("");
+  const [limitAsset, setLimitAsset] = useState<AssetKey>("USDG");
+  const limitAddress = limitAsset === "ETH" ? ETH_ADDRESS : deployment.usdg;
   const [msg, setMsg] = useState<string | null>(null);
   const rg = useQuery({
-    queryKey: ["rg", address],
+    queryKey: ["rg", address, limitAsset],
     enabled: !!address && !!client,
     refetchInterval: 15_000,
     queryFn: async () => {
-      const read = (functionName: "excludedUntil" | "dailyLimit" | "pendingDailyLimit" | "pendingDailyLimitAt") =>
+      const read = (functionName: "dailyLimit" | "pendingDailyLimit" | "pendingDailyLimitAt") =>
         client!.readContract({
           address: deployment.book,
           abi: oddraBookAbi,
           functionName,
-          args: [address!],
+          args: [address!, limitAddress],
         }) as Promise<bigint>;
       const [excludedUntil, dailyLimit, pendingLimit, pendingAt] = await Promise.all([
-        read("excludedUntil"),
+        client!.readContract({
+          address: deployment.book,
+          abi: oddraBookAbi,
+          functionName: "excludedUntil",
+          args: [address!],
+        }) as Promise<bigint>,
         read("dailyLimit"),
         read("pendingDailyLimit"),
         read("pendingDailyLimitAt"),
@@ -149,28 +156,39 @@ export default function ProfilePage() {
             <p className="text-[13px] text-muted">
               Current:{" "}
               <span className="num text-fg">
-                {rg.data ? (rg.data.dailyLimit === 0n ? "none" : `${fmtUsdg(rg.data.dailyLimit)} USDG`) : "–"}
+                {rg.data ? (rg.data.dailyLimit === 0n ? "none" : fmtAsset(rg.data.dailyLimit, limitAsset)) : "–"}
               </span>
               {rg.data && rg.data.pendingAt > 0 ? (
                 <>
                   {" "}
-                  · changing to {rg.data.pendingLimit === 0n ? "none" : `${fmtUsdg(rg.data.pendingLimit)} USDG`} on{" "}
+                  · changing to {rg.data.pendingLimit === 0n
+                    ? "none"
+                    : fmtAsset(rg.data.pendingLimit, limitAsset)} on{" "}
                   {new Date(rg.data.pendingAt * 1000).toLocaleString()}
                 </>
               ) : null}
             </p>
             <p className="text-[12px] text-muted">Lowering applies immediately. Raising or removing waits 24 hours.</p>
             <div className="flex gap-2">
+              <select
+                value={limitAsset}
+                onChange={(e) => setLimitAsset(e.target.value as AssetKey)}
+                className="h-8 rounded-md border border-line bg-raised px-2 text-[12px]"
+                aria-label="Limit asset"
+              >
+                <option value="USDG">{usdgSymbol}</option>
+                <option value="ETH">ETH</option>
+              </select>
               <input
                 value={limit}
                 onChange={(e) => setLimit(e.target.value)}
-                placeholder="USDG per day (0 = none)"
+                placeholder={`${limitAsset} per day (0 = none)`}
                 inputMode="decimal"
                 className="num h-8 flex-1 rounded-md border border-line bg-bg px-3 text-[13px] outline-none focus:border-accent/60"
               />
               <Button
                 size="sm"
-                disabled={parseUsdg(limit) === null}
+                disabled={parseAmount(limit, limitAsset === "ETH" ? 18 : 6) === null}
                 onClick={() =>
                   void send(
                     () =>
@@ -178,7 +196,7 @@ export default function ProfilePage() {
                         address: deployment.book,
                         abi: oddraBookAbi,
                         functionName: "setDailyLimit",
-                        args: [parseUsdg(limit)!],
+                        args: [limitAddress, parseAmount(limit, limitAsset === "ETH" ? 18 : 6)!],
                       }),
                     "Limit updated.",
                   )

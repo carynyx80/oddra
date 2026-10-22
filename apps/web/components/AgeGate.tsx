@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isMainnet } from "@/lib/config";
 import { Button } from "./ui/primitives";
 
 const KEY = "oddra.age-confirmed.v1";
@@ -28,9 +29,15 @@ export function AgeGate() {
           Before you continue
         </h2>
         <ul className="mt-3 space-y-2 text-[13px] text-muted">
-          <li>Oddra runs on a test network. Test USDG has no value and cannot be bought or sold.</li>
-          <li>Real-money wagering is disabled until licensing, compliance and security approvals are complete.</li>
-          <li>You must be of legal age to gamble where you live, and not in a restricted jurisdiction.</li>
+          {isMainnet ? (
+            <>
+              <li>Oddra uses real funds: bets are placed and paid in USDG or ETH on Robinhood Chain.</li>
+              <li>Only bet what you can afford to lose. Self-exclusion and daily limits are on your Profile page.</li>
+            </>
+          ) : (
+            <li>Oddra runs on a test network. Test USDG has no value and cannot be bought or sold.</li>
+          )}
+          <li>You must be of legal age to gamble where you live, and online gambling must be legal there.</li>
         </ul>
         <div className="mt-5 flex gap-2">
           <Button

@@ -2,14 +2,22 @@
 
 import { useMemo } from "react";
 import { GAME_SECONDS_PER_REAL_SECOND } from "@oddra/engine";
-import { formatClock, phaseOf, slot } from "@oddra/shared";
+import { formatClock, isRevealed, phaseOf, slot } from "@oddra/shared";
 import { Pitch } from "@/components/Pitch";
 import { BettingRail, NextUp, ProofCard } from "@/components/live/BettingRail";
 import { EventToast, MatchTabs, Momentum, PossessionBar, ResultsStrip } from "@/components/live/MatchCentre";
 import { Scoreboard } from "@/components/live/Scoreboard";
 import { Badge, Card, Empty } from "@/components/ui/primitives";
 import { deployed } from "@/lib/config";
-import { chainNowSync, useLiveFeed, useRecentMatches, useSchedule, useSimulation, useVisibleEvents } from "@/lib/hooks";
+import {
+  STATUS,
+  chainNowSync,
+  useLiveFeed,
+  useRecentMatches,
+  useSchedule,
+  useSimulation,
+  useVisibleEvents,
+} from "@/lib/hooks";
 import { configFor, previewFrame, statsAt } from "@/lib/match";
 import { useSlip } from "@/lib/slip";
 import { useEffect } from "react";
@@ -30,7 +38,7 @@ export default function LivePage() {
   const s = id !== null ? slot(id) : null;
   const phase = s && now !== null ? phaseOf(s, now) : null;
   const cfg = featured ? configFor(featured.id, featured.m.homeTeam, featured.m.awayTeam) : null;
-  const revealed = featured ? featured.m.status >= 3 && featured.m.status !== 5 : false;
+  const revealed = featured ? isRevealed(featured.m.status) : false;
   const { result } = useSimulation(
     id,
     featured?.m.homeTeam,
@@ -180,7 +188,11 @@ export default function LivePage() {
                   : phase === "finished"
                     ? featured.book.settled
                       ? "Settled"
-                      : "Settling"
+                      : featured.status === "Proposed"
+                        ? "Final soon"
+                        : featured.status === "Disputed"
+                          ? "Disputed"
+                          : "Settling"
                     : "Locked"
               }
             />
@@ -208,7 +220,7 @@ export default function LivePage() {
           cfg: configFor(r.id, r.m.homeTeam, r.m.awayTeam),
           homeGoals: r.m.homeGoals,
           awayGoals: r.m.awayGoals,
-          status: ["None", "Scheduled", "Locked", "Revealed", "Settled", "Voided"][r.m.status],
+          status: STATUS[r.m.status],
         }))}
       />
     </div>

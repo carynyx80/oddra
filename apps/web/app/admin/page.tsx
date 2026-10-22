@@ -8,7 +8,7 @@ import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat } from "@/components/ui/primitives";
 import { deployment, txUrl } from "@/lib/config";
 import { useTreasury } from "@/lib/hooks";
-import { fmtUsdg, short } from "@/lib/utils";
+import { fmtAsset, fmtUsdg, short } from "@/lib/utils";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export default function AdminPage() {
@@ -128,8 +128,12 @@ export default function AdminPage() {
         />
         <Stat
           label="Treasury free"
-          value={treasury.data ? fmtUsdg(treasury.data.freeBalance, 0) : "–"}
-          sub={treasury.data ? `${fmtUsdg(treasury.data.totalReserved, 0)} reserved` : ""}
+          value={treasury.data ? `${fmtUsdg(treasury.data.USDG.freeBalance, 0)} USDG` : "–"}
+          sub={
+            treasury.data
+              ? `${fmtAsset(treasury.data.ETH.freeBalance, "ETH")} free · reserved ${fmtUsdg(treasury.data.USDG.totalReserved, 0)} USDG / ${fmtAsset(treasury.data.ETH.totalReserved, "ETH")}`
+              : ""
+          }
         />
         <Stat label="Settlement queue" value={String(s.pendingPayouts ?? 0)} sub="winning or refund bets unpaid" />
         <Stat label="Failed jobs" value={String((s.failedJobs ?? []).length)} sub="retried automatically" />

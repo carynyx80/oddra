@@ -6,17 +6,22 @@ import { zeroHash, type Address, type Hex } from "viem";
 import { usePublicClient } from "wagmi";
 import type { MatchEvent, MatchResult } from "@oddra/engine";
 import {
+  ETH_ADDRESS,
+  MATCH_STATUS,
+  isEth,
   oddraBookAbi,
   oddraMatchRegistryAbi,
+  oddraRiskManagerAbi,
   oddraTestUSDGAbi,
   oddraTreasuryAbi,
   phaseOf,
   slot,
   slotAt,
+  type AssetKey,
 } from "@oddra/shared";
 import { deployed, deployment, liveUrl } from "./config";
 
-export const STATUS = ["None", "Scheduled", "Locked", "Revealed", "Settled", "Voided"] as const;
+export const STATUS = MATCH_STATUS;
 export type StatusName = (typeof STATUS)[number];
 
 // ------------------------------------------------------------------ time
@@ -81,6 +86,16 @@ export interface OnchainMatch {
   serverSeed: Hex;
   finalSeed: Hex;
   resultHash: Hex;
+  proposedAt: bigint;
+}
+
+export interface AssetBook {
+  settled: boolean;
+  voided: boolean;
+  winMask: number;
+  totalStakes: bigint;
+  reserved: bigint;
+  owed: bigint;
 }
 
 export interface MatchView {
@@ -89,8 +104,18 @@ export interface MatchView {
   status: StatusName;
   odds: number[];
   oddsVersion: number;
-  book: { settled: boolean; voided: boolean; winMask: number; totalStakes: bigint; reserved: bigint; owed: bigint };
+  /** Both asset books close together; `settled`/`winMask` describe the match. */
+  book: { settled: boolean; voided: boolean; winMask: number; usdg: AssetBook; eth: AssetBook };
 }
+
+const toBook = (bs: readonly [boolean, boolean, number, bigint, bigint, bigint]): AssetBook => ({
+  settled: bs[0],
+  voided: bs[1],
+  winMask: Number(bs[2]),
+  totalStakes: bs[3],
+  reserved: bs[4],
+  owed: bs[5],
+});
 
 export function useMatch(id: bigint | null | undefined, refetchMs = 4_000) {
   const client = usePublicClient();
@@ -99,7 +124,7 @@ export function useMatch(id: bigint | null | undefined, refetchMs = 4_000) {
     enabled: deployed && id != null && !!client,
     refetchInterval: refetchMs,
     queryFn: async (): Promise<MatchView> => {
-      const [m, [odds, oddsVersion], bs] = await Promise.all([
+      const [m, [odds, oddsVersion], bu, be] = await Promise.all([
         client!.readContract({
           address: deployment.registry,
           abi: oddraMatchRegistryAbi,
@@ -107,8 +132,21 @@ export function useMatch(id: bigint | null | undefined, refetchMs = 4_000) {
           args: [id!],
         }),
         client!.readContract({ address: deployment.book, abi: oddraBookAbi, functionName: "odds", args: [id!] }),
-        client!.readContract({ address: deployment.book, abi: oddraBookAbi, functionName: "bookState", args: [id!] }),
+        client!.readContract({
+          address: deployment.book,
+          abi: oddraBookAbi,
+          functionName: "bookState",
+          args: [id!, deployment.usdg],
+        }),
+        client!.readContract({
+          address: deployment.book,
+          abi: oddraBookAbi,
+          functionName: "bookState",
+          args: [id!, ETH_ADDRESS],
+        }),
       ]);
+      const usdg = toBook(bu);
+      const eth = toBook(be);
       const mm = m as unknown as OnchainMatch;
       return {
         id: id!,
@@ -117,12 +155,11 @@ export function useMatch(id: bigint | null | undefined, refetchMs = 4_000) {
         odds: [...(odds as readonly number[])],
         oddsVersion: Number(oddsVersion),
         book: {
-          settled: bs[0],
-          voided: bs[1],
-          winMask: Number(bs[2]),
-          totalStakes: bs[3],
-          reserved: bs[4],
-          owed: bs[5],
+          settled: usdg.settled || eth.settled,
+          voided: usdg.voided || eth.voided,
+          winMask: usdg.winMask || eth.winMask,
+          usdg,
+          eth,
         },
       };
     },
@@ -271,7 +308,8 @@ export function useUsdg(owner?: Address) {
             }) as Promise<bigint>)
           : Promise.resolve(0n),
       ]);
-      return { balance, allowance, lastDrip };
+      const eth = await client!.getBalance({ address: owner! });
+      return { balance, allowance, lastDrip, eth };
     },
   });
 }
@@ -281,6 +319,8 @@ export interface BetRow {
   matchId: bigint;
   selection: number;
   odds: number;
+  /** "USDG" or "ETH" */
+  asset: AssetKey;
   stake: bigint;
   payout: bigint;
   placedAt: bigint;
@@ -333,12 +373,14 @@ export function useMyBets(owner?: Address) {
             payout: bigint;
             placedAt: bigint;
             paid: boolean;
+            asset: Address;
           };
           return {
             id,
             matchId: bet.matchId,
             selection: bet.selection,
             odds: bet.odds,
+            asset: (isEth(bet.asset) ? "ETH" : "USDG") as AssetKey,
             stake: bet.stake,
             payout: bet.payout,
             placedAt: bet.placedAt,
@@ -349,20 +391,21 @@ export function useMyBets(owner?: Address) {
           };
         }),
       );
-      const matchIds = [...new Set(rows.map((r) => r.matchId.toString()))];
+      const keys = [...new Set(rows.map((r) => `${r.matchId}:${r.asset}`))];
       const books = await Promise.all(
-        matchIds.map((m) =>
-          client!.readContract({
+        keys.map((k) => {
+          const [m, a] = k.split(":");
+          return client!.readContract({
             address: deployment.book,
             abi: oddraBookAbi,
             functionName: "bookState",
-            args: [BigInt(m)],
-          }),
-        ),
+            args: [BigInt(m), a === "ETH" ? ETH_ADDRESS : deployment.usdg],
+          });
+        }),
       );
-      const bookOf = new Map(matchIds.map((m, i) => [m, books[i]]));
+      const bookOf = new Map(keys.map((k, i) => [k, books[i]]));
       for (const r of rows) {
-        const [settled, voided, mask] = bookOf.get(r.matchId.toString())!;
+        const [settled, voided, mask] = bookOf.get(`${r.matchId}:${r.asset}`)!;
         r.won = voided ? false : settled ? ((Number(mask) >>> r.selection) & 1) === 1 : null;
       }
       return rows;
@@ -370,34 +413,71 @@ export function useMyBets(owner?: Address) {
   });
 }
 
+const TREASURY_FNS = [
+  "balance",
+  "freeBalance",
+  "totalReserved",
+  "totalStakes",
+  "totalPayouts",
+  "totalContributed",
+  "totalCreatorFees",
+  "totalWithdrawn",
+] as const;
+export type TreasuryTotals = Record<(typeof TREASURY_FNS)[number], bigint>;
+
+/** Live treasury totals for both betting assets. */
 export function useTreasury() {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["treasury"],
     enabled: deployed && !!client,
     refetchInterval: 10_000,
-    queryFn: async () => {
-      const fns = [
-        "balance",
-        "freeBalance",
-        "totalReserved",
-        "totalStakes",
-        "totalPayouts",
-        "totalContributed",
-        "totalCreatorFees",
-        "totalWithdrawn",
-      ] as const;
-      const vals = await Promise.all(
-        fns.map(
-          (fn) =>
-            client!.readContract({
-              address: deployment.treasury,
-              abi: oddraTreasuryAbi,
-              functionName: fn,
-            }) as Promise<bigint>,
-        ),
-      );
-      return Object.fromEntries(fns.map((f, i) => [f, vals[i]])) as Record<(typeof fns)[number], bigint>;
+    queryFn: async (): Promise<Record<AssetKey, TreasuryTotals>> => {
+      const read = async (asset: Address) => {
+        const vals = await Promise.all(
+          TREASURY_FNS.map(
+            (fn) =>
+              client!.readContract({
+                address: deployment.treasury,
+                abi: oddraTreasuryAbi,
+                functionName: fn,
+                args: [asset],
+              }) as Promise<bigint>,
+          ),
+        );
+        return Object.fromEntries(TREASURY_FNS.map((f, i) => [f, vals[i]])) as TreasuryTotals;
+      };
+      const [USDG, ETH] = await Promise.all([read(deployment.usdg), read(ETH_ADDRESS)]);
+      return { USDG, ETH };
+    },
+  });
+}
+
+export interface StakeLimits {
+  minStake: bigint;
+  maxStake: bigint;
+  maxPayout: bigint;
+}
+
+/** The risk manager's per-asset stake limits, for the bet slip. */
+export function useLimits() {
+  const client = usePublicClient();
+  return useQuery({
+    queryKey: ["limits"],
+    enabled: deployed && !!client,
+    staleTime: 60_000,
+    queryFn: async (): Promise<Record<AssetKey, StakeLimits>> => {
+      const read = async (asset: Address) => {
+        const l = (await client!.readContract({
+          address: deployment.risk,
+          abi: oddraRiskManagerAbi,
+          functionName: "limits",
+          args: [asset],
+        })) as readonly bigint[];
+        return { minStake: l[0], maxStake: l[1], maxPayout: l[2] };
+      };
+      const [USDG, ETH] = await Promise.all([read(deployment.usdg), read(ETH_ADDRESS)]);
+      return { USDG, ETH };
     },
   });
 }

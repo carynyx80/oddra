@@ -134,7 +134,11 @@ export function Scoreboard({ id, cfg, slot, now, phase, score, gameSeconds, reve
         ? "Full time · settled on-chain"
         : status === "Voided"
           ? "Voided · stakes refundable"
-          : "Full time · settling";
+          : status === "Proposed"
+            ? "Full time · result final after the dispute window"
+            : status === "Disputed"
+              ? "Full time · result disputed, awaiting the arbiter"
+              : "Full time · settling";
 
   return (
     <section

@@ -10,7 +10,7 @@ import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat, Tabs } from "@/components/ui/primitives";
 import { deployment, txUrl } from "@/lib/config";
 import { useMyBets, type BetRow } from "@/lib/hooks";
-import { fmtUsdg } from "@/lib/utils";
+import { fmtAsset } from "@/lib/utils";
 
 type Tab = "open" | "won" | "lost" | "claimable" | "history";
 const TONE = { Open: "muted", Won: "pos", Lost: "neg", Refund: "warn", Paid: "accent" } as const;
@@ -33,9 +33,9 @@ export default function BetsPage() {
     claimable: rows.filter((b) => b.claimable > 0n),
     history: rows,
   };
-  const claimableTotal = groups.claimable.reduce((t, b) => t + b.claimable, 0n);
-  const staked = rows.reduce((t, b) => t + b.stake, 0n);
-  const pending = groups.open.reduce((t, b) => t + b.payout, 0n);
+  // never add ETH to USDG: every total is per asset
+  const sum = (list: BetRow[], pick: (b: BetRow) => bigint, asset: "USDG" | "ETH") =>
+    list.filter((b) => b.asset === asset).reduce((t, b) => t + pick(b), 0n);
 
   if (!isConnected)
     return (
@@ -53,9 +53,39 @@ export default function BetsPage() {
     <div className="space-y-4">
       <h1 className="font-[family-name:var(--font-display)] text-[22px] font-semibold">My Bets</h1>
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Stat label="Claimable" value={`${fmtUsdg(claimableTotal)}`} sub="USDG" />
-        <Stat label="Pending winnings" value={fmtUsdg(pending)} sub="if open bets win" />
-        <Stat label="Total staked" value={fmtUsdg(staked)} sub={`${rows.length} bets`} />
+        <Stat
+          label="Claimable"
+          value={fmtAsset(
+            sum(groups.claimable, (b) => b.claimable, "USDG"),
+            "USDG",
+          )}
+          sub={fmtAsset(
+            sum(groups.claimable, (b) => b.claimable, "ETH"),
+            "ETH",
+          )}
+        />
+        <Stat
+          label="Pending winnings"
+          value={fmtAsset(
+            sum(groups.open, (b) => b.payout, "USDG"),
+            "USDG",
+          )}
+          sub={`${fmtAsset(
+            sum(groups.open, (b) => b.payout, "ETH"),
+            "ETH",
+          )} · if open bets win`}
+        />
+        <Stat
+          label="Total staked"
+          value={fmtAsset(
+            sum(rows, (b) => b.stake, "USDG"),
+            "USDG",
+          )}
+          sub={`${fmtAsset(
+            sum(rows, (b) => b.stake, "ETH"),
+            "ETH",
+          )} · ${rows.length} bets`}
+        />
         <Stat label="Settled" value={String(rows.filter((b) => b.status !== "Open").length)} sub="bets" />
       </Card>
       <Card>
@@ -133,10 +163,10 @@ function BetTable({ rows, txByBet }: { rows: BetRow[]; txByBet: Record<string, s
                 </td>
                 <td className="px-4 py-3 text-muted">{MARKETS.find((m) => m.key === sel.market)?.title}</td>
                 <td className="px-4 py-3">{sel.label}</td>
-                <td className="num px-4 py-3">{fmtUsdg(b.stake)}</td>
+                <td className="num px-4 py-3">{fmtAsset(b.stake, b.asset)}</td>
                 <td className="num px-4 py-3">{formatOdds(b.odds)}</td>
                 <td className="num px-4 py-3">
-                  {fmtUsdg(b.status === "Refund" || (b.status === "Paid" && !b.won) ? b.stake : b.payout)}
+                  {fmtAsset(b.status === "Refund" || (b.status === "Paid" && !b.won) ? b.stake : b.payout, b.asset)}
                 </td>
                 <td className="px-4 py-3">
                   <Badge tone={TONE[b.status]}>
@@ -153,7 +183,7 @@ function BetTable({ rows, txByBet }: { rows: BetRow[]; txByBet: Record<string, s
                 <td className="px-4 py-3 text-right">
                   {b.claimable > 0n ? (
                     <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => claim(b.id)}>
-                      {busy === b.id.toString() ? "Claiming…" : `Claim ${fmtUsdg(b.claimable)}`}
+                      {busy === b.id.toString() ? "Claiming…" : `Claim ${fmtAsset(b.claimable, b.asset)}`}
                     </Button>
                   ) : null}
                 </td>
@@ -170,7 +200,15 @@ function ClaimHistory({
   claims,
   available,
 }: {
-  claims: { id: number; betId: string; amount: string; automatic: boolean; txHash: string; createdAt: string }[];
+  claims: {
+    id: number;
+    betId: string;
+    amount: string;
+    asset?: "USDG" | "ETH";
+    automatic: boolean;
+    txHash: string;
+    createdAt: string;
+  }[];
   available?: boolean;
 }) {
   return (
@@ -190,7 +228,7 @@ function ClaimHistory({
           {claims.map((c) => (
             <li key={c.id} className="flex items-center gap-4 px-4 py-2.5 text-[13px]">
               <span className="num w-24 text-muted">bet #{c.betId}</span>
-              <span className="num flex-1">{fmtUsdg(c.amount)} USDG</span>
+              <span className="num flex-1">{fmtAsset(c.amount, c.asset ?? "USDG")}</span>
               <Badge>{c.automatic ? "Automatic" : "Claimed"}</Badge>
               <span className="num hidden text-muted sm:block">{new Date(c.createdAt).toLocaleString()}</span>
               <ExtLink href={txUrl(c.txHash)}>tx</ExtLink>

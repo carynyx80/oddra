@@ -4,14 +4,14 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAccount } from "wagmi";
 import type { MatchConfig } from "@oddra/engine";
-import { SELECTIONS, formatClock, formatOdds } from "@oddra/shared";
+import { SELECTIONS, ST, formatClock, formatOdds, hasResult, isRevealed } from "@oddra/shared";
 import { BetSlip } from "@/components/live/BetSlip";
 import { Markets } from "@/components/live/Markets";
 import { Crest } from "@/components/live/Scoreboard";
 import { Badge, Card } from "@/components/ui/primitives";
 import { useMyBets, type MatchView } from "@/lib/hooks";
 import { useSlip } from "@/lib/slip";
-import { fmtUsdg } from "@/lib/utils";
+import { fmtAsset } from "@/lib/utils";
 
 const TONE = { Open: "muted", Won: "pos", Lost: "neg", Refund: "warn", Paid: "accent" } as const;
 
@@ -40,7 +40,7 @@ export function BettingRail({
           <div>
             <div className="text-[13px] font-medium">{betting ? "Place a bet" : "Betting closed"}</div>
             <div className="text-[11px] text-muted">
-              {cfg.home.short} v {cfg.away.short} · single bets in USDG
+              {cfg.home.short} v {cfg.away.short} · single bets in USDG or ETH
             </div>
           </div>
           {betting && closesIn !== null ? (
@@ -106,7 +106,7 @@ export function BettingRail({
                       : SELECTIONS[b.selection].label}
                 </span>
                 <span className="num text-muted">
-                  {fmtUsdg(b.stake)} @ {formatOdds(b.odds)}
+                  {fmtAsset(b.stake, b.asset)} @ {formatOdds(b.odds)}
                 </span>
                 <Badge tone={TONE[b.status]}>{b.status === "Paid" ? (b.won ? "Paid" : "Refunded") : b.status}</Badge>
               </li>
@@ -144,8 +144,12 @@ export function ProofCard({ match }: { match: MatchView }) {
   const steps = [
     { label: "Seed committed before betting", done: m.status >= 1 },
     { label: `Entropy block ${m.entropyBlock > 0n ? `#${m.entropyBlock}` : "chosen at kickoff"}`, done: m.status >= 2 },
-    { label: "Seed revealed, final seed fixed", done: m.status >= 3 && m.status !== 5 },
-    { label: "Result settled on-chain", done: m.status === 4 },
+    { label: "Seed revealed, final seed fixed", done: isRevealed(m.status) },
+    { label: "Result proposed, open to disputes", done: hasResult(m.status) },
+    {
+      label: m.status === ST.Disputed ? "Disputed: awaiting the arbiter" : "Result final on-chain",
+      done: m.status === ST.Settled,
+    },
   ];
   return (
     <Card className="p-4">

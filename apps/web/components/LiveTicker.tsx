@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GAME_SECONDS_PER_REAL_SECOND } from "@oddra/engine";
-import { formatClock, phaseOf, slot } from "@oddra/shared";
+import { formatClock, isRevealed, phaseOf, slot } from "@oddra/shared";
 import { LiveDot } from "@/components/ui/primitives";
 import { useSchedule, useSimulation, useVisibleEvents } from "@/lib/hooks";
 import { configFor } from "@/lib/match";
@@ -13,7 +13,7 @@ export function LiveTicker() {
   const path = usePathname();
   const { now, current } = useSchedule();
   const v = current.data && current.data.status !== "None" ? current.data : null;
-  const revealed = !!v && v.m.status >= 3 && v.m.status !== 5;
+  const revealed = !!v && isRevealed(v.m.status);
   const { result } = useSimulation(v?.id, v?.m.homeTeam, v?.m.awayTeam, revealed ? v!.m.finalSeed : undefined);
   const s = v ? slot(v.id) : null;
   const events = useVisibleEvents(result, s?.kickoff, now);

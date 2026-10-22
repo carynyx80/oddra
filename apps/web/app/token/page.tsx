@@ -9,7 +9,7 @@ import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat } from "@/components/ui/primitives";
 import { addressUrl, deployment, odraToken, txUrl } from "@/lib/config";
 import { useTreasury } from "@/lib/hooks";
-import { fmtUsdg, short } from "@/lib/utils";
+import { fmtAsset, fmtUsdg, short } from "@/lib/utils";
 
 export default function TokenPage() {
   const t = useTreasury();
@@ -25,13 +25,15 @@ export default function TokenPage() {
   async function forward() {
     setMsg(null);
     try {
-      const hash = await writeContractAsync({
-        address: deployment.feeCollector,
-        abi: oddraFeeCollectorAbi,
-        functionName: "forward",
-      });
-      await client!.waitForTransactionReceipt({ hash });
-      setMsg("Forwarded any USDG held by the collector to the treasury.");
+      for (const functionName of ["forwardETH", "forward"] as const) {
+        const hash = await writeContractAsync({
+          address: deployment.feeCollector,
+          abi: oddraFeeCollectorAbi,
+          functionName,
+        });
+        await client!.waitForTransactionReceipt({ hash });
+      }
+      setMsg("Forwarded the ETH and USDG held by the collector to the treasury.");
     } catch (e) {
       setMsg(explain(e));
     }
@@ -76,20 +78,27 @@ export default function TokenPage() {
           <ol className="list-decimal space-y-2 py-4 pl-9 pr-4 text-[13px] text-muted">
             <li>100% of net creator fees the project receives are allocated to the betting treasury.</li>
             <li>The fee collector claims accrued fees from the launch platform&apos;s escrow (permissionless).</li>
-            <li>Fees paid in ETH are converted to USDG only through an audited adapter with a minimum-output check.</li>
-            <li>USDG is forwarded to the treasury and recorded on-chain as a creator-fee contribution.</li>
-            <li>Fees that have not arrived as USDG are never counted as betting liquidity.</li>
+            <li>
+              Fees paid in ETH go straight into the treasury&apos;s ETH book (ETH is a betting asset); fees in USDG into
+              the USDG book.
+            </li>
+            <li>Each transfer is recorded on-chain as a creator-fee contribution.</li>
+            <li>Fees that have not arrived in the treasury are never counted as betting liquidity.</li>
           </ol>
         </Card>
       </div>
       <Card className="grid grid-cols-2 gap-5 p-4 md:grid-cols-4">
-        <Stat label="Creator fees to treasury" value={t.data ? fmtUsdg(t.data.totalCreatorFees, 0) : "–"} sub="USDG" />
+        <Stat
+          label="Creator fees to treasury"
+          value={t.data ? fmtAsset(t.data.ETH.totalCreatorFees, "ETH") : "–"}
+          sub={t.data ? `+ ${fmtUsdg(t.data.USDG.totalCreatorFees, 0)} USDG` : ""}
+        />
         <Stat
           label="Fee collector"
           value={deployment.feeCollector ? short(deployment.feeCollector) : "–"}
           sub={deployment.feeCollector ? <ExtLink href={addressUrl(deployment.feeCollector)}>explorer</ExtLink> : null}
         />
-        <Stat label="Conversion adapter" value="None" sub="ETH stays in the collector until one is audited" />
+        <Stat label="ETH fees" value="Direct" sub="ETH is a betting asset: forwarded as ETH, no swap" />
         <Stat label="Utility" value="Ecosystem" sub="no wagering use" />
       </Card>
       <Card>
@@ -98,7 +107,7 @@ export default function TokenPage() {
           right={
             deployment.feeCollector ? (
               <Button size="sm" onClick={forward}>
-                Forward collected USDG
+                Forward collected fees
               </Button>
             ) : null
           }
@@ -112,9 +121,9 @@ export default function TokenPage() {
               q.data.receipts as { id: number; asset: string; amount: string; txHash: string; createdAt: string }[]
             ).map((r) => (
               <li key={r.id} className="flex items-center gap-4 px-4 py-2.5 text-[13px]">
-                <Badge>{r.asset === "USDG" ? "To treasury" : "Received"}</Badge>
+                <Badge>{r.asset === "ETH" ? "Received" : "To treasury"}</Badge>
                 <span className="num flex-1">
-                  {r.asset === "USDG" ? `${fmtUsdg(r.amount)} USDG` : `${(Number(r.amount) / 1e18).toFixed(6)} ETH`}
+                  {r.asset === "USDG" ? `${fmtUsdg(r.amount)} USDG` : fmtAsset(r.amount, "ETH")}
                 </span>
                 <span className="num hidden text-muted sm:block">{new Date(r.createdAt).toLocaleString()}</span>
                 <ExtLink href={txUrl(r.txHash)}>tx</ExtLink>

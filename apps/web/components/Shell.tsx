@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "./Logo";
 import { AgeGate } from "./AgeGate";
 import { LiveTicker } from "./LiveTicker";
-import { chain, deployed } from "@/lib/config";
+import { chain, deployed, isMainnet } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -26,7 +26,9 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh">
       <div className="border-b border-line bg-bg-2 px-4 py-1.5 text-center text-[11px] text-muted">
-        {chain.name} · test tokens only, no real money · real-money wagering is disabled
+        {isMainnet
+          ? `${chain.name} · real funds · bets in USDG or ETH · 18+ · play responsibly`
+          : `${chain.name} · test tokens only, no real money`}
       </div>
       <header className="sticky top-0 z-30 border-b border-line bg-bg/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-6 px-4">

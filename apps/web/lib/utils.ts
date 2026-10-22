@@ -19,3 +19,17 @@ export const parseUsdg = (s: string): bigint | null => {
 };
 
 export const json = (v: unknown) => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x)));
+
+/** Formats a base-unit amount of a betting asset: "25.00 USDG" or "0.0100 ETH". */
+export function fmtAsset(
+  units: bigint | number | string | null | undefined,
+  asset: "USDG" | "ETH",
+  withSymbol = true,
+): string {
+  if (units === null || units === undefined) return "–";
+  const decimals = asset === "ETH" ? 18 : 6;
+  const n = Number(units) / 10 ** decimals;
+  const digits = asset === "ETH" ? (n !== 0 && Math.abs(n) < 0.01 ? 5 : 4) : 2;
+  const s = n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return withSymbol ? `${s} ${asset}` : s;
+}

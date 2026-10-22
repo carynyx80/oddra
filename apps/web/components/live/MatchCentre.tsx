@@ -438,7 +438,7 @@ export function ResultsStrip({ rows }: { rows: StripRow[] }) {
               <div className="num mb-2 flex justify-between text-[10px] uppercase tracking-wider text-muted">
                 <span>#{r.id.toString()}</span>
                 <span className={r.status === "Settled" ? "text-pos" : r.status === "Voided" ? "text-warn" : ""}>
-                  {r.status === "Settled" ? "Verified" : r.status}
+                  {r.status === "Settled" ? "Verified" : r.status === "Proposed" ? "Final soon" : r.status}
                 </span>
               </div>
               {[0, 1].map((side) => {
@@ -451,7 +451,9 @@ export function ResultsStrip({ rows }: { rows: StripRow[] }) {
                     <span className={cn("flex-1 truncate", r.status === "Settled" && g < o && "text-muted")}>
                       {t.name}
                     </span>
-                    <span className="num font-semibold">{r.status === "Settled" ? g : "–"}</span>
+                    <span className="num font-semibold">
+                      {r.status === "Settled" || r.status === "Proposed" ? g : "–"}
+                    </span>
                   </div>
                 );
               })}

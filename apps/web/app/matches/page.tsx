@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { phaseOf, slot } from "@oddra/shared";
+import { hasResult, phaseOf, slot } from "@oddra/shared";
 import { Badge, Card, CardHeader, Empty, LiveDot } from "@/components/ui/primitives";
 import { STATUS, useRecentMatches, useSchedule, type MatchView } from "@/lib/hooks";
 import { configFor } from "@/lib/match";
@@ -48,7 +48,9 @@ function Row({
         ) : phase === "betting" ? (
           <Badge tone="accent">Betting open</Badge>
         ) : (
-          <Badge tone={status === "Settled" ? "pos" : status === "Voided" ? "warn" : "muted"}>{status}</Badge>
+          <Badge tone={status === "Settled" ? "pos" : status === "Voided" || status === "Disputed" ? "warn" : "muted"}>
+            {status}
+          </Badge>
         )}
         {status === "Settled" ? (
           <Badge tone={bookSettled ? "pos" : "muted"}>{bookSettled ? "Paid out" : "Settling"}</Badge>
@@ -125,7 +127,7 @@ export default function MatchesPage() {
                 home={r.m.homeTeam}
                 away={r.m.awayTeam}
                 status={STATUS[r.m.status]}
-                score={r.m.status === 4 ? `${r.m.homeGoals}-${r.m.awayGoals}` : "–"}
+                score={hasResult(r.m.status) ? `${r.m.homeGoals}-${r.m.awayGoals}` : "–"}
                 now={now}
               />
             ))}

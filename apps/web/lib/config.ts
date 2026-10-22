@@ -1,5 +1,6 @@
 import type { Address } from "viem";
 import { chainById, type Deployment } from "@oddra/shared";
+import mainnetDeployment from "../../../contracts/deployments/4663.json";
 import testnet from "../../../contracts/deployments/46630.json";
 
 /**
@@ -7,7 +8,7 @@ import testnet from "../../../contracts/deployments/46630.json";
  * NEXT_PUBLIC_* variable overrides it (for example a fresh deployment or a local anvil).
  */
 const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 46630);
-const base = (chainId === 46630 ? testnet : {}) as Partial<Deployment>;
+const base = (chainId === 46630 ? testnet : chainId === 4663 ? mainnetDeployment : {}) as Partial<Deployment>;
 const addr = (env: string | undefined, fallback?: string) => (env || fallback || "") as Address;
 
 export const deployment: Deployment = {
@@ -23,6 +24,9 @@ export const deployment: Deployment = {
 };
 
 export const chain = chainById(chainId);
+/** Real funds: Robinhood Chain mainnet with Paxos USDG and native ETH. */
+export const isMainnet = chainId === 4663;
+export const usdgSymbol = deployment.testToken ? "tUSDG" : "USDG";
 export const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || chain.rpcUrls.default.http[0];
 export const liveUrl = process.env.NEXT_PUBLIC_LIVE_URL || "";
 export const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
@@ -31,7 +35,7 @@ export const deployed = Boolean(deployment.book && deployment.registry);
 /** $ODRA has not launched. Set NEXT_PUBLIC_ODRA_TOKEN_ADDRESS only to the verified address once it exists. */
 export const odraToken = (process.env.NEXT_PUBLIC_ODRA_TOKEN_ADDRESS || "") as Address | "";
 
-/** Real USDG on Robinhood Chain, for reference only (Paxos docs; see docs/VERIFIED_ADDRESSES.md). */
+/** Paxos USDG on Robinhood Chain (Paxos docs; see docs/VERIFIED_ADDRESSES.md). */
 export const REAL_USDG = {
   testnet: "0x7E955252E15c84f5768B83c41a71F9eba181802F",
   mainnet: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
