@@ -7,11 +7,14 @@ import {
   oddraTreasuryAbi,
   ETH_ADDRESS,
   isEth,
+  oddraExchangeAbi,
   selectionWins,
 } from "@oddra/shared";
 import type { Chain } from "./chain";
 import type { Env } from "./env";
 import { log } from "./log";
+
+const ZERO = "0x0000000000000000000000000000000000000000";
 
 const STEP = 2_000n;
 const CONFIRMATIONS = 2n;
@@ -29,14 +32,16 @@ export class Indexer {
     private readonly chain: Chain,
   ) {
     const d = env.deployment;
-    this.abis = {
-      [d.book.toLowerCase()]: { name: "book", abi: oddraBookAbi as Abi },
-      [d.registry.toLowerCase()]: { name: "registry", abi: oddraMatchRegistryAbi as Abi },
-      [d.treasury.toLowerCase()]: { name: "treasury", abi: oddraTreasuryAbi as Abi },
-      ...(d.feeCollector
-        ? { [d.feeCollector.toLowerCase()]: { name: "feeCollector", abi: oddraFeeCollectorAbi as Abi } }
-        : {}),
-    };
+    const entries: [Address | undefined, string, Abi][] = [
+      [d.book, "book", oddraBookAbi as Abi],
+      [d.registry, "registry", oddraMatchRegistryAbi as Abi],
+      [d.exchange, "exchange", oddraExchangeAbi as Abi],
+      [d.treasury, "treasury", oddraTreasuryAbi as Abi],
+      [d.feeCollector, "feeCollector", oddraFeeCollectorAbi as Abi],
+    ];
+    this.abis = Object.fromEntries(
+      entries.filter(([a]) => a && a !== ZERO).map(([a, name, abi]) => [a!.toLowerCase(), { name, abi }]),
+    );
   }
 
   async run(): Promise<bigint> {
@@ -272,6 +277,77 @@ export class Indexer {
           update: {},
         });
         break;
+      case "exchange.OfferPlaced":
+        await prisma.exchangeOffer.upsert({
+          where: { id: a.offerId },
+          create: {
+            id: a.offerId,
+            matchId: a.matchId,
+            maker: (a.maker as string).toLowerCase(),
+            selection: Number(a.selection),
+            side: Number(a.side) === 0 ? "BACK" : "LAY",
+            odds: Number(a.odds),
+            asset: assetKey(a.asset),
+            amount: a.amount.toString(),
+            txHash,
+            createdAt,
+          },
+          update: {},
+        });
+        break;
+      case "exchange.OfferClosed":
+        await prisma.exchangeOffer.updateMany({
+          where: { id: a.offerId },
+          data: { closed: true, refunded: a.refunded.toString() },
+        });
+        break;
+      case "exchange.Matched": {
+        for (const who of [a.backer, a.layer] as string[]) {
+          const w = who.toLowerCase();
+          await prisma.wallet.upsert({
+            where: { address: w },
+            create: { address: w },
+            update: { lastSeenAt: createdAt },
+          });
+        }
+        await prisma.exchangePosition.upsert({
+          where: { id: a.positionId },
+          create: {
+            id: a.positionId,
+            matchId: a.matchId,
+            offerId: a.offerId,
+            backer: (a.backer as string).toLowerCase(),
+            layer: (a.layer as string).toLowerCase(),
+            selection: Number(a.selection),
+            odds: Number(a.odds),
+            asset: assetKey(a.asset),
+            stake: a.stake.toString(),
+            liability: a.liability.toString(),
+            txHash,
+            createdAt,
+          },
+          update: {},
+        });
+        break;
+      }
+      case "exchange.Paid": {
+        const fee = BigInt(a.fee);
+        const winner = fee === 0n ? null : Number(a.side) === 0 ? "BACK" : "LAY";
+        await prisma.exchangePosition.updateMany({
+          where: { id: a.positionId },
+          data: { winner: winner ?? undefined, paidAmount: a.amount.toString(), fee: a.fee.toString() },
+        });
+        break;
+      }
+      case "exchange.PayoutFailed":
+        await prisma.alert.create({
+          data: {
+            level: "warn",
+            source: "payouts",
+            message: `Exchange payout for position ${a.positionId} failed; it stays claimable.`,
+          },
+        });
+        break;
       case "feeCollector.ForwardedETH":
         await prisma.creatorFeeReceipt.upsert({
           where: { txHash_logIndex: { txHash, logIndex } },
@@ -334,6 +410,7 @@ export class Indexer {
 
   /** Snapshot of the on-chain treasury totals for each asset, every 10 minutes, for the charts. */
   async snapshot() {
+    if (this.env.deployment.mode === "exchange") return; // no house treasury
     const prisma = db();
     const last = await prisma.treasurySnapshot.findFirst({ orderBy: { takenAt: "desc" } });
     if (last && Date.now() - last.takenAt.getTime() < 10 * 60_000) return;

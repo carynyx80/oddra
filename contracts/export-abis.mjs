@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const names = [
+  "OddraExchange",
   "OddraBook",
   "OddraMatchRegistry",
   "OddraTreasury",

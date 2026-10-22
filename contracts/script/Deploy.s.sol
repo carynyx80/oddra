@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Script, console2} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {OddraBook} from "../src/OddraBook.sol";
+import {OddraExchange} from "../src/OddraExchange.sol";
 import {OddraFeeCollector} from "../src/OddraFeeCollector.sol";
 import {OddraMatchRegistry, NativeBlockSource, IBlockSource} from "../src/OddraMatchRegistry.sol";
 import {OddraRiskManager} from "../src/OddraRiskManager.sol";
@@ -20,6 +21,7 @@ import {ForkTestBlockSource} from "../src/testnet/ForkTestBlockSource.sol";
 ///   ARBITER_ADDRESS                rules on disputed results; required on mainnet and must differ from the operator
 ///   USDG_ADDRESS                   empty on testnet/anvil = deploy the no-value test token. On mainnet it must be
 ///                                  Paxos USDG 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168 (checked).
+///   MODE=exchange|house            exchange (default): peer-to-peer, no house liquidity; house: treasury-backed book
 ///   TREASURY_SEED_USDG             whole test USDG minted into the treasury (test token only, default 250000)
 ///   TREASURY_SEED_ETH_WEI          ETH the deployer contributes to the treasury's ETH book (default 0)
 ///   BLOCK_SOURCE=native|fork       block.number/blockhash, or a test-only deterministic source, instead of ArbSys
@@ -41,6 +43,7 @@ contract Deploy is Script {
         bool testToken;
         uint256 seedUsdg;
         uint256 seedEth;
+        bool house;
     }
 
     function run() external {
@@ -63,40 +66,71 @@ contract Deploy is Script {
         require(block.chainid != MAINNET || address(blocks) == ARBSYS, "mainnet must use ArbSys");
 
         // the deployer administers during setup, then hands every admin role to ADMIN_ADDRESS
-        OddraMatchRegistry registry = new OddraMatchRegistry(c.deployer, blocks);
-        OddraTreasury treasury = new OddraTreasury(c.deployer, usdg);
-        OddraRiskManager risk = new OddraRiskManager(c.deployer, _assets(c.usdg), _limits(_mainnet()));
-        OddraBook book = new OddraBook(c.deployer, usdg, registry, treasury, risk);
-        OddraFeeCollector collector = new OddraFeeCollector(c.deployer, usdg, treasury);
-
-        registry.grantRole(registry.OPERATOR_ROLE(), c.operator);
-        registry.grantRole(registry.ARBITER_ROLE(), c.arbiter);
-        registry.setDisputeParams(10 minutes, 0.005 ether, address(treasury));
-        book.grantRole(book.OPERATOR_ROLE(), c.operator);
-        book.grantRole(book.PAUSER_ROLE(), c.admin);
-        treasury.grantRole(treasury.BOOK_ROLE(), address(book));
-        treasury.grantRole(treasury.TREASURER_ROLE(), c.admin);
-        risk.grantRole(risk.RISK_ROLE(), c.admin);
-        collector.grantRole(collector.KEEPER_ROLE(), c.keeper);
-
-        if (c.testToken && c.seedUsdg > 0) {
-            OddraTestUSDG(c.usdg).mint(c.deployer, c.seedUsdg * 1e6);
-            usdg.approve(address(treasury), c.seedUsdg * 1e6);
-            treasury.contribute(c.usdg, c.seedUsdg * 1e6, treasury.SOURCE_HOUSE());
-        }
-        if (c.seedEth > 0) treasury.contribute{value: c.seedEth}(address(0), c.seedEth, treasury.SOURCE_HOUSE());
-
+        Out memory out;
+        out.registry = new OddraMatchRegistry(c.deployer, blocks);
+        out.registry.grantRole(out.registry.OPERATOR_ROLE(), c.operator);
+        out.registry.grantRole(out.registry.ARBITER_ROLE(), c.arbiter);
+        if (c.house) _deployHouse(c, usdg, out);
+        else _deployExchange(c, usdg, out);
         if (c.admin != c.deployer) {
             // AccessControlDefaultAdminRules: the new admin accepts after the 1-day delay
-            registry.beginDefaultAdminTransfer(c.admin);
-            treasury.beginDefaultAdminTransfer(c.admin);
-            risk.beginDefaultAdminTransfer(c.admin);
-            book.beginDefaultAdminTransfer(c.admin);
-            collector.beginDefaultAdminTransfer(c.admin);
+            out.registry.beginDefaultAdminTransfer(c.admin);
+            if (c.house) {
+                out.treasury.beginDefaultAdminTransfer(c.admin);
+                out.risk.beginDefaultAdminTransfer(c.admin);
+                out.book.beginDefaultAdminTransfer(c.admin);
+                out.collector.beginDefaultAdminTransfer(c.admin);
+            } else {
+                out.exchange.beginDefaultAdminTransfer(c.admin);
+            }
         }
         vm.stopBroadcast();
+        _write(c, out);
+    }
 
-        _write(c, registry, treasury, risk, book, collector);
+    struct Out {
+        OddraMatchRegistry registry;
+        OddraTreasury treasury;
+        OddraRiskManager risk;
+        OddraBook book;
+        OddraFeeCollector collector;
+        OddraExchange exchange;
+    }
+
+    /// @dev Peer-to-peer: bettors are each other's counterparties; no house liquidity is needed.
+    function _deployExchange(Cfg memory c, IERC20 usdg, Out memory out) internal {
+        bool mainnet = _mainnet();
+        out.exchange = new OddraExchange(
+            c.deployer, usdg, out.registry, 1e6, mainnet ? uint128(0.0003 ether) : uint128(0.00001 ether)
+        );
+        out.exchange.grantRole(out.exchange.OPERATOR_ROLE(), c.operator);
+        out.exchange.grantRole(out.exchange.PAUSER_ROLE(), c.admin);
+        out.exchange.grantRole(out.exchange.TREASURER_ROLE(), c.admin);
+        // forfeited dispute bonds go to the admin (there is no house treasury)
+        out.registry.setDisputeParams(10 minutes, 0.005 ether, c.admin);
+    }
+
+    /// @dev House-backed book: the treasury is every bettor's counterparty and must be funded.
+    function _deployHouse(Cfg memory c, IERC20 usdg, Out memory out) internal {
+        out.treasury = new OddraTreasury(c.deployer, usdg);
+        out.risk = new OddraRiskManager(c.deployer, _assets(c.usdg), _limits(_mainnet()));
+        out.book = new OddraBook(c.deployer, usdg, out.registry, out.treasury, out.risk);
+        out.collector = new OddraFeeCollector(c.deployer, usdg, out.treasury);
+        out.registry.setDisputeParams(10 minutes, 0.005 ether, address(out.treasury));
+        out.book.grantRole(out.book.OPERATOR_ROLE(), c.operator);
+        out.book.grantRole(out.book.PAUSER_ROLE(), c.admin);
+        out.treasury.grantRole(out.treasury.BOOK_ROLE(), address(out.book));
+        out.treasury.grantRole(out.treasury.TREASURER_ROLE(), c.admin);
+        out.risk.grantRole(out.risk.RISK_ROLE(), c.admin);
+        out.collector.grantRole(out.collector.KEEPER_ROLE(), c.keeper);
+        if (c.testToken && c.seedUsdg > 0) {
+            OddraTestUSDG(c.usdg).mint(c.deployer, c.seedUsdg * 1e6);
+            usdg.approve(address(out.treasury), c.seedUsdg * 1e6);
+            out.treasury.contribute(c.usdg, c.seedUsdg * 1e6, out.treasury.SOURCE_HOUSE());
+        }
+        if (c.seedEth > 0) {
+            out.treasury.contribute{value: c.seedEth}(address(0), c.seedEth, out.treasury.SOURCE_HOUSE());
+        }
     }
 
     function _config() internal view returns (Cfg memory c) {
@@ -110,6 +144,7 @@ contract Deploy is Script {
         c.testToken = c.usdg == address(0);
         c.seedUsdg = vm.envOr("TREASURY_SEED_USDG", uint256(250_000));
         c.seedEth = vm.envOr("TREASURY_SEED_ETH_WEI", uint256(0));
+        c.house = keccak256(bytes(vm.envOr("MODE", string("exchange")))) == keccak256("house");
         if (_mainnet()) {
             require(c.usdg == MAINNET_USDG, "mainnet must use Paxos USDG");
             require(c.arbiter != c.operator, "arbiter must differ from operator");
@@ -173,32 +208,30 @@ contract Deploy is Script {
             });
     }
 
-    function _write(
-        Cfg memory c,
-        OddraMatchRegistry registry,
-        OddraTreasury treasury,
-        OddraRiskManager risk,
-        OddraBook book,
-        OddraFeeCollector collector
-    ) internal {
+    function _write(Cfg memory c, Out memory out) internal {
         string memory k = "deployment";
         vm.serializeUint(k, "chainId", block.chainid);
         vm.serializeUint(k, "deployedAtBlock", block.number);
+        vm.serializeString(k, "mode", c.house ? "house" : "exchange");
         vm.serializeBool(k, "testToken", c.testToken);
         vm.serializeAddress(k, "usdg", c.usdg);
-        vm.serializeAddress(k, "registry", address(registry));
-        vm.serializeAddress(k, "treasury", address(treasury));
-        vm.serializeAddress(k, "risk", address(risk));
-        vm.serializeAddress(k, "book", address(book));
-        vm.serializeAddress(k, "feeCollector", address(collector));
+        vm.serializeAddress(k, "registry", address(out.registry));
+        if (c.house) {
+            vm.serializeAddress(k, "treasury", address(out.treasury));
+            vm.serializeAddress(k, "risk", address(out.risk));
+            vm.serializeAddress(k, "book", address(out.book));
+            vm.serializeAddress(k, "feeCollector", address(out.collector));
+        } else {
+            vm.serializeAddress(k, "exchange", address(out.exchange));
+        }
         vm.serializeAddress(k, "operator", c.operator);
         vm.serializeAddress(k, "arbiter", c.arbiter);
         string memory json = vm.serializeAddress(k, "admin", c.admin);
         vm.writeJson(json, string.concat("deployments/", vm.toString(block.chainid), ".json"));
+        console2.log("mode", c.house ? "house" : "exchange");
         console2.log("usdg", c.usdg);
-        console2.log("registry", address(registry));
-        console2.log("treasury", address(treasury));
-        console2.log("book", address(book));
-        console2.log("feeCollector", address(collector));
+        console2.log("registry", address(out.registry));
+        if (c.house) console2.log("book", address(out.book));
+        else console2.log("exchange", address(out.exchange));
     }
 }

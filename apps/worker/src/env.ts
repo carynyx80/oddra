@@ -24,6 +24,8 @@ function loadDeployment(chainId: number): Deployment {
   const d = {
     chainId,
     deployedAtBlock: Number(process.env.DEPLOYED_AT_BLOCK ?? base.deployedAtBlock ?? 0),
+    mode: (process.env.MODE as Deployment["mode"]) ?? base.mode ?? (base.exchange ? "exchange" : "house"),
+    exchange: pick("exchange", "EXCHANGE_ADDRESS"),
     testToken: base.testToken ?? true,
     usdg: pick("usdg", "USDG_ADDRESS"),
     registry: pick("registry", "REGISTRY_ADDRESS"),
@@ -32,8 +34,11 @@ function loadDeployment(chainId: number): Deployment {
     book: pick("book", "BOOK_ADDRESS"),
     feeCollector: pick("feeCollector", "FEE_COLLECTOR_ADDRESS"),
   } as Deployment;
-  for (const k of ["usdg", "registry", "treasury", "book"] as const)
-    if (!d[k]) throw new Error(`missing ${k} address: deploy the contracts or set it in env`);
+  const needed =
+    d.mode === "exchange"
+      ? (["usdg", "registry", "exchange"] as const)
+      : (["usdg", "registry", "treasury", "book"] as const);
+  for (const k of needed) if (!d[k]) throw new Error(`missing ${k} address: deploy the contracts or set it in env`);
   return d;
 }
 

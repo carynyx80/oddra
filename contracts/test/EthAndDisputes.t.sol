@@ -258,6 +258,19 @@ contract DisputeTest is Base {
         assertEq(alice.balance - a0, 0.2 ether);
     }
 
+    function test_ForfeitedBondGoesToAPlainWalletSink() public {
+        vm.prank(admin);
+        registry.setDisputeParams(10 minutes, 0.005 ether, admin); // exchange mode: no treasury
+        openMatch(1, flatOdds(200));
+        propose(1, 1, 0, 1);
+        uint256 a0 = admin.balance;
+        vm.prank(watcher);
+        registry.dispute{value: 0.005 ether}(1);
+        vm.prank(arbiter);
+        registry.resolveDispute(1, 1, 0, 1, keccak256("result"));
+        assertEq(admin.balance - a0, 0.005 ether);
+    }
+
     function test_OnlyAdminSetsDisputeParamsWithinBounds() public {
         vm.prank(operator);
         vm.expectRevert();

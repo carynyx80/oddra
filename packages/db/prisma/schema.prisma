@@ -412,3 +412,45 @@ model Alert {
 
   @@index([resolved, createdAt])
 }
+
+// ---------------------------------------------------------------- exchange (peer-to-peer mode)
+
+model ExchangeOffer {
+  id        BigInt   @id // on-chain offer id
+  matchId   BigInt
+  maker     String
+  selection Int
+  side      String // "BACK" | "LAY"
+  odds      Int
+  asset     String // "USDG" | "ETH"
+  amount    Decimal  @db.Decimal(38, 0) // backer-stake units
+  closed    Boolean  @default(false)
+  refunded  Decimal? @db.Decimal(38, 0)
+  txHash    String
+  createdAt DateTime
+
+  @@index([matchId])
+  @@index([maker])
+}
+
+model ExchangePosition {
+  id         BigInt   @id // on-chain position id
+  matchId    BigInt
+  offerId    BigInt
+  backer     String
+  layer      String
+  selection  Int
+  odds       Int
+  asset      String
+  stake      Decimal  @db.Decimal(38, 0)
+  liability  Decimal  @db.Decimal(38, 0)
+  winner     String? // "BACK" | "LAY" | "VOID" once paid
+  paidAmount Decimal? @db.Decimal(38, 0)
+  fee        Decimal? @db.Decimal(38, 0)
+  txHash     String
+  createdAt  DateTime
+
+  @@index([matchId])
+  @@index([backer])
+  @@index([layer])
+}

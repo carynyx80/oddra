@@ -30,6 +30,8 @@ export function chainById(id: number): Chain {
 export interface Deployment {
   chainId: number;
   deployedAtBlock: number;
+  /** "exchange": peer-to-peer back/lay exchange (no house liquidity). "house": treasury-backed book. */
+  mode?: "exchange" | "house";
   testToken: boolean;
   usdg: Address;
   registry: Address;
@@ -37,8 +39,11 @@ export interface Deployment {
   risk: Address;
   book: Address;
   feeCollector: Address;
+  exchange?: Address;
   arbiter?: Address;
 }
+
+export const isExchange = (d: Pick<Deployment, "mode" | "exchange">) => d.mode === "exchange" || (!!d.exchange && d.mode !== "house");
 
 export function explorerUrl(chain: Chain, kind: "tx" | "address" | "block", value: string): string | null {
   const base = chain.blockExplorers?.default.url;

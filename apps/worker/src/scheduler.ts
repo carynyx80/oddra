@@ -21,6 +21,7 @@ import {
   hasResult,
   isRevealed,
   oddraBookAbi,
+  oddraExchangeAbi,
   oddraMatchRegistryAbi,
   oddraTreasuryAbi,
   skewForExposure,
@@ -195,6 +196,8 @@ export class Scheduler {
     if (this.inflight.has(key)) return;
     this.inflight.add(key);
     try {
+      // exchange mode: unmatched offers go back to their makers as soon as the market closes
+      if (this.exchange && m.status >= ST.Scheduled && now >= s.kickoff) await this.exchangeReclaim(id);
       switch (m.status) {
         case 0: {
           if (id === cur + 1n && now < s.openTime - 10) {
@@ -311,7 +314,8 @@ export class Scheduler {
         }
         case ST.Settled:
         case ST.Voided:
-          await this.closeBookAndPay(id);
+          if (this.exchange) await this.exchangeSettle(id);
+          else await this.closeBookAndPay(id);
           break;
       }
     } finally {
@@ -332,6 +336,14 @@ export class Scheduler {
         now > ps.fullTime + (await this.disputeWindow()) + 600
       )
         return `Paused: match ${prev} is awaiting settlement.`;
+    }
+    if (this.exchange) {
+      const paused = (await this.chain.pub.readContract({
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "paused",
+      })) as boolean;
+      return paused ? "Paused: the exchange is paused by the operator." : null;
     }
     const [free, freeEth, paused] = await Promise.all([
       this.chain.pub.readContract({
@@ -436,6 +448,25 @@ export class Scheduler {
       }
       return;
     }
+    if (this.exchange) {
+      // exchange mode: the engine's prices are only a published guide; bettors set their own odds
+      const ref = (await this.chain.pub.readContract({
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "referenceOdds",
+        args: [id],
+      })) as readonly number[];
+      if (ref.some((o) => o > 0)) return;
+      await this.chain.send({
+        purpose: "publishReferenceOdds",
+        matchId: id,
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "publishReferenceOdds",
+        args: [id, this.baseOdds.get(key)!],
+      });
+      return;
+    }
     const [current, version] = (await this.chain.pub.readContract({
       address: this.d.book,
       abi: oddraBookAbi,
@@ -537,6 +568,91 @@ export class Scheduler {
       }),
       prisma.match.update({ where: { id }, data: { eventLogHash: eventLogHash(r), verifiedAt: new Date() } }),
     ]);
+  }
+
+  private get exchange() {
+    return this.d.mode === "exchange";
+  }
+
+  private readonly reclaimed = new Set<string>();
+
+  /** Returns unmatched escrow of a closed market's offers to their makers (keeper duty; anyone can do it). */
+  private async exchangeReclaim(id: bigint) {
+    const key = id.toString();
+    if (this.reclaimed.has(key)) return;
+    const [ids, offers] = (await this.chain.pub.readContract({
+      address: this.d.exchange!,
+      abi: oddraExchangeAbi,
+      functionName: "matchOffers",
+      args: [id],
+    })) as readonly [readonly bigint[], readonly { closed: boolean; escrow: bigint }[]];
+    const open = ids.filter((_, i) => !offers[i].closed);
+    if (open.length === 0) {
+      this.reclaimed.add(key);
+      return;
+    }
+    for (let i = 0; i < open.length; i += 40)
+      await this.chain.send({
+        purpose: "reclaimBatch",
+        matchId: id,
+        signer: "keeper",
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "reclaimBatch",
+        args: [open.slice(i, i + 40)],
+      });
+  }
+
+  private readonly paidOut = new Set<string>();
+
+  /** Pays both sides of every position of a settled or voided match (failed transfers stay claimable). */
+  private async exchangeSettle(id: bigint) {
+    const key = id.toString();
+    if (this.paidOut.has(key)) return;
+    const ids = (await this.chain.pub.readContract({
+      address: this.d.exchange!,
+      abi: oddraExchangeAbi,
+      functionName: "positionsOfMatch",
+      args: [id],
+    })) as readonly bigint[];
+    const due: bigint[] = [];
+    for (const pid of ids) {
+      const p = (await this.chain.pub.readContract({
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "getPosition",
+        args: [pid],
+      })) as {
+        backer: Hex;
+        layer: Hex;
+      };
+      for (const who of [p.backer, p.layer]) {
+        const [amount] = (await this.chain.pub.readContract({
+          address: this.d.exchange!,
+          abi: oddraExchangeAbi,
+          functionName: "claimable",
+          args: [pid, who],
+        })) as readonly [bigint, bigint, number];
+        if (amount > 0n) {
+          due.push(pid);
+          break;
+        }
+      }
+    }
+    if (due.length === 0) {
+      this.paidOut.add(key);
+      return;
+    }
+    for (let i = 0; i < due.length; i += 40)
+      await this.chain.send({
+        purpose: "payoutBatch",
+        matchId: id,
+        signer: "keeper",
+        address: this.d.exchange!,
+        abi: oddraExchangeAbi,
+        functionName: "payoutBatch",
+        args: [due.slice(i, i + 40)],
+      });
   }
 
   private async closeBookAndPay(id: bigint) {

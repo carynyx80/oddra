@@ -250,13 +250,8 @@ contract OddraMatchRegistry is AccessControlDefaultAdminRules {
         m.resultHash = resultHash;
         m.status = Status.Settled;
         Dispute memory d = disputes[matchId];
-        if (overturned) {
-            _refund(d.disputer, d.bond);
-        } else if (bondSink != address(0)) {
-            IBondSink(bondSink).contribute{value: d.bond}(address(0), d.bond, "dispute-bond");
-        } else {
-            _refund(d.disputer, d.bond);
-        }
+        if (overturned || bondSink == address(0)) _refund(d.disputer, d.bond);
+        else _forfeit(d.bond);
         emit DisputeResolved(matchId, overturned, msg.sender);
         emit MatchSettled(matchId, homeGoals, awayGoals, firstScorer, resultHash);
     }
@@ -278,6 +273,18 @@ contract OddraMatchRegistry is AccessControlDefaultAdminRules {
 
     function _validate(uint8 h, uint8 a, uint8 first, bytes32 resultHash) private pure {
         if (!OddraMarkets.isValidResult(h, a, first) || resultHash == bytes32(0)) revert OddraMarkets.InvalidResult();
+    }
+
+    /// @dev Forfeited bonds go to `bondSink`: the treasury's accounted `contribute` when it has one, otherwise a plain
+    ///      transfer (an admin wallet or multisig in exchange mode). If both fail, the sink can pull it later.
+    function _forfeit(uint256 amount) private {
+        if (bondSink.code.length > 0) {
+            try IBondSink(bondSink).contribute{value: amount}(address(0), amount, "dispute-bond") {
+                return;
+            } catch {}
+        }
+        (bool ok,) = bondSink.call{value: amount}("");
+        if (!ok) pendingRefunds[bondSink] += amount;
     }
 
     function _refund(address to, uint256 amount) private {
