@@ -1,5 +1,15 @@
 # Status
 
+## 2026-10-22 — v3: peer-to-peer exchange (no house liquidity)
+
+| Check        | Result                                                                                                                                                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Foundry      | 79 + 1 tests pass, including 18 for `OddraExchange` (back/lay, partial fills, rounding, self-match, cancel/reclaim, void refunds, commission, limits) and a fuzz test that all escrow is returned                              |
+| E2E          | `exchange.e2e.test.ts` passes on a local chain and on a Robinhood mainnet fork with real Paxos USDG: USDG and ETH matches, unmatched offers refunded at kickoff, dispute window, payouts minus 2% commission, escrow back to 0 |
+| Web          | Back/lay board with best prices per asset, order ticket (takes best offers, posts the rest), My Bets with matched/unmatched/claim/cancel, exchange stats; 6 unit tests for order planning                                      |
+| Testnet live | Exchange deployed and verified: registry `0x1771…ce3D`, exchange `0xc887…97Af`, tUSDG `0x6fFD…d5Fb`; worker running in exchange mode                                                                                           |
+| Mainnet      | Not deployed yet: waiting for gas on the operator wallet `0x6BE11613429d54AD60975F2bcD9A7f85FE481456` and the admin/arbiter address                                                                                            |
+
 ## 2026-10-22 — v2: ETH + USDG betting, dispute window, mainnet-ready
 
 | Check             | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

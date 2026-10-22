@@ -1,14 +1,12 @@
 {
   "admin": "0x64D3521F1F848F2EEFe1CB12ACcD4Aa52B8e291e",
   "arbiter": "0x64D3521F1F848F2EEFe1CB12ACcD4Aa52B8e291e",
-  "book": "0x5aBcD00fF888e8cE1De68CeeCC1Fe440f10d28d3",
   "chainId": 46630,
-  "deployedAtBlock": 140302829,
-  "feeCollector": "0x468A3CdED53b7C5b3Fc15D5a76e4d5e800d7FbE1",
+  "deployedAtBlock": 140331795,
+  "exchange": "0xc8871FBf7026b208dA7c7A265A0C6b20cc2397Af",
+  "mode": "exchange",
   "operator": "0x64D3521F1F848F2EEFe1CB12ACcD4Aa52B8e291e",
-  "registry": "0x4D4F0Ad8d168304ecf558FAa20f3a0C4Cb032B0f",
-  "risk": "0x563DEae909398C124D2D9e3edC20EAb683Fe8fa6",
+  "registry": "0x1771e903Eb96Db619BC3816BCa83f49E728Fce3D",
   "testToken": true,
-  "treasury": "0x24993ed6eEe0Ed7BE14815031fdc36bef75545de",
-  "usdg": "0xa292289B863777045a87AfE83f669e85d7192e11"
+  "usdg": "0x6fFD2091976fCb41A1CDF36C2330DAED4b02d5Fb"
 }
