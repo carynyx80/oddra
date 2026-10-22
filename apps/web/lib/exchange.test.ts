@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { bestPrices, liabilityFor, planOrder, type OfferRow } from "./exchange";
 
-const ME = "0x00000000000000000000000000000000000000aa";
-const OTHER = "0x00000000000000000000000000000000000000bb";
+const ME = "0x00000000000000000000000000000000000000aa" as const;
+const OTHER = "0x00000000000000000000000000000000000000bb" as const;
 const U = 1_000_000n;
 let next = 0n;
 const offer = (p: Partial<OfferRow>): OfferRow => ({

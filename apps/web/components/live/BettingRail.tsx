@@ -115,7 +115,9 @@ export function BettingRail({
         ) : null}
         {!betting ? (
           <div className="border-b border-line px-4 py-2.5 text-[12px] text-muted">
-            Prices below are the ones that applied. Betting reopens for the next match when this one ends.
+            {exchangeMode
+              ? "Matched bets are locked in; unmatched offers were returned at kickoff. Betting reopens for the next match when this one ends."
+              : "Prices below are the ones that applied. Betting reopens for the next match when this one ends."}
           </div>
         ) : null}
         <Markets
