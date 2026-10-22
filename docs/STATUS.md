@@ -19,7 +19,7 @@ keeper on testnet) and source-verified on [Blockscout](https://explorer.testnet.
 - **Worker**: running on the developer's Mac (local Postgres), committing and pricing a match every 20 minutes. It
   stops when that machine sleeps or shuts down; move it to a persistent host for real uptime.
 - **Web**: Vercel project `oddra` (team Carynyx), production deployments from `main` at `oddra-two.vercel.app`.
-  The team's default Vercel Authentication protects it, so it is not yet public. No database or live-feed URL is
+  Production is public; preview deployments stay behind Vercel Authentication. No database or live-feed URL is
   configured there yet, so it runs in chain-only mode.
 
 ### Built and verified
@@ -39,7 +39,6 @@ keeper on testnet) and source-verified on [Blockscout](https://explorer.testnet.
 | CI workflow on GitHub       | The `gh` token lacks the `workflow` scope; `.github/workflows/ci.yml` is ready locally               |
 | Persistent worker host      | An account on Railway / Fly.io / Render (or a VM) and the worker secrets                             |
 | Managed Postgres for Vercel | A `DATABASE_URL` (history, charts, leaderboard, operations dashboard)                                |
-| Public site                 | Turn off Vercel Authentication for production, or add a custom domain                                |
 | $ODRA                       | Not launched; no address shown until a verified one exists                                           |
 | ETH → USDG fee conversion   | A verified liquid route and an audited adapter                                                       |
 | Real money                  | Licensing, audit, multisig admin, on-chain result verification, VRF (see FAIRNESS.md, COMPLIANCE.md) |
