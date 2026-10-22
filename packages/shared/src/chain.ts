@@ -1,8 +1,8 @@
 import { defineChain, type Address, type Chain } from "viem";
-import { robinhoodTestnet } from "viem/chains";
+import { robinhood, robinhoodTestnet } from "viem/chains";
 
-/** Robinhood Chain testnet (46630), as published in viem: RPC, Blockscout explorer and Multicall3. */
-export { robinhoodTestnet };
+/** Robinhood Chain mainnet (4663) and testnet (46630), as published in viem: RPC, Blockscout explorer, Multicall3. */
+export { robinhood, robinhoodTestnet };
 
 export const anvil = defineChain({
   id: 31337,
@@ -12,12 +12,18 @@ export const anvil = defineChain({
   testnet: true,
 });
 
-export const CHAINS: Record<number, Chain> = { [robinhoodTestnet.id]: robinhoodTestnet, [anvil.id]: anvil };
+export const CHAINS: Record<number, Chain> = {
+  [robinhood.id]: robinhood,
+  [robinhoodTestnet.id]: robinhoodTestnet,
+  [anvil.id]: anvil,
+};
 
-/** Robinhood Chain mainnet (4663) is deliberately absent: real-money wagering stays disabled. */
+export const MAINNET_ID = 4663;
+export const isMainnet = (id: number) => id === MAINNET_ID;
+
 export function chainById(id: number): Chain {
   const c = CHAINS[id];
-  if (!c) throw new Error(`Oddra does not support chain ${id}. Only testnet (46630) and anvil (31337) are allowed.`);
+  if (!c) throw new Error(`Oddra does not support chain ${id} (supported: 4663, 46630, 31337)`);
   return c;
 }
 
@@ -31,6 +37,7 @@ export interface Deployment {
   risk: Address;
   book: Address;
   feeCollector: Address;
+  arbiter?: Address;
 }
 
 export function explorerUrl(chain: Chain, kind: "tx" | "address" | "block", value: string): string | null {

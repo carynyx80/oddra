@@ -13,8 +13,13 @@ import {
   type MatchResult,
 } from "@oddra/engine";
 import {
+  ETH_ADDRESS,
+  MATCH_STATUS,
   SELECTIONS,
+  ST,
   fixtureFor,
+  hasResult,
+  isRevealed,
   oddraBookAbi,
   oddraMatchRegistryAbi,
   oddraTreasuryAbi,
@@ -29,11 +34,21 @@ import { errMsg, log } from "./log";
 import { priceFixture } from "./pricing";
 import { seedCommit, serverSeed } from "./seeds";
 
-export const STATUS = ["None", "Scheduled", "Locked", "Revealed", "Settled", "Voided"] as const;
-const DB_STATUS: MatchStatus[] = ["NONE", "SCHEDULED", "LOCKED", "REVEALED", "SETTLED", "VOIDED"];
+export const STATUS = MATCH_STATUS;
+const DB_STATUS: MatchStatus[] = [
+  "NONE",
+  "SCHEDULED",
+  "LOCKED",
+  "REVEALED",
+  "PROPOSED",
+  "DISPUTED",
+  "SETTLED",
+  "VOIDED",
+];
 
 const REVEAL_WINDOW = 600;
 const SETTLE_WINDOW = 6 * 3600;
+const ARBITRATION_WINDOW = 24 * 3600;
 const LIVE = 900;
 const ENTROPY_HORIZON = 240; // L2 blocks a hash stays readable (256) minus margin
 const SKEW_EVERY = 45;
@@ -55,6 +70,7 @@ export interface OnchainMatch {
   serverSeed: Hex;
   finalSeed: Hex;
   resultHash: Hex;
+  proposedAt: bigint;
 }
 
 export interface SchedulerStatus {
@@ -96,6 +112,45 @@ export class Scheduler {
     await Promise.all(this.pricing.values());
   }
 
+  private blockSource: Hex | null = null;
+
+  /** The L2 block number as the registry sees it (ArbSys on Robinhood Chain), so reveal timing matches the contract. */
+  async blockHead(): Promise<bigint> {
+    this.blockSource ??= (await this.chain.pub.readContract({
+      address: this.d.registry,
+      abi: oddraMatchRegistryAbi,
+      functionName: "blocks",
+    })) as Hex;
+    return (await this.chain.pub.readContract({
+      address: this.blockSource,
+      abi: [
+        {
+          type: "function",
+          name: "arbBlockNumber",
+          inputs: [],
+          outputs: [{ type: "uint256" }],
+          stateMutability: "view",
+        },
+      ] as const,
+      functionName: "arbBlockNumber",
+    })) as bigint;
+  }
+
+  private windowCache: { at: number; value: number } | null = null;
+
+  /** The registry's dispute window in seconds (cached for a minute). */
+  async disputeWindow(): Promise<number> {
+    if (!this.windowCache || Date.now() - this.windowCache.at > 60_000) {
+      const v = (await this.chain.pub.readContract({
+        address: this.d.registry,
+        abi: oddraMatchRegistryAbi,
+        functionName: "disputeWindow",
+      })) as bigint;
+      this.windowCache = { at: Date.now(), value: Number(v) };
+    }
+    return this.windowCache.value;
+  }
+
   private get d() {
     return this.env.deployment;
   }
@@ -121,7 +176,7 @@ export class Scheduler {
       try {
         const m = await this.readMatch(id);
         this.status.matches[id.toString()] = { status: STATUS[m.status], home: m.homeTeam, away: m.awayTeam };
-        if (m.status >= 3) this.ensureSimulated(id, m);
+        if (isRevealed(m.status)) this.ensureSimulated(id, m);
         if (leader) await this.step(id, m, now, cur);
         if (hasDatabase() && m.status > 0) await this.syncRow(id, m);
       } catch (e) {
@@ -168,7 +223,7 @@ export class Scheduler {
           break;
         }
         case 2: {
-          const head = await this.chain.pub.getBlockNumber({ cacheTime: 0 });
+          const head = await this.blockHead();
           if (now > s.kickoff + REVEAL_WINDOW) await this.void(id);
           else if (head > m.entropyBlock && head <= m.entropyBlock + BigInt(ENTROPY_HORIZON)) {
             const seed = serverSeed(this.env.seedSecret, this.env.chainId, this.d.registry, id);
@@ -188,7 +243,7 @@ export class Scheduler {
           }
           break;
         }
-        case 3: {
+        case ST.Revealed: {
           if (now >= s.fullTime) {
             if (now > s.kickoff + LIVE + SETTLE_WINDOW) {
               await this.void(id);
@@ -196,21 +251,66 @@ export class Scheduler {
             }
             const r = this.ensureSimulated(id, m);
             if (!r) break;
-            await this.job(id, "settle", () =>
+            await this.job(id, "propose", () =>
               this.chain.send({
-                purpose: "settle",
+                purpose: "proposeResult",
                 matchId: id,
                 address: this.d.registry,
                 abi: oddraMatchRegistryAbi,
-                functionName: "settle",
+                functionName: "proposeResult",
                 args: [id, r.homeGoals, r.awayGoals, firstScorerCode(r.firstScorer), resultHash(r)],
               }),
             );
           }
           break;
         }
-        case 4:
-        case 5:
+        case ST.Proposed: {
+          // watcher duty: never finalise a proposal that disagrees with our own replay
+          const r = this.ensureSimulated(id, m);
+          if (!r) break;
+          const agrees =
+            r.homeGoals === m.homeGoals &&
+            r.awayGoals === m.awayGoals &&
+            firstScorerCode(r.firstScorer) === m.firstScorer &&
+            resultHash(r) === m.resultHash;
+          if (!agrees) {
+            this.recordError(
+              id,
+              "verify",
+              new Error(
+                `proposed result ${m.homeGoals}-${m.awayGoals} disagrees with the replay ${r.homeGoals}-${r.awayGoals}; dispute it`,
+              ),
+              "critical",
+            );
+            break;
+          }
+          const window = await this.disputeWindow();
+          if (now >= Number(m.proposedAt) + window)
+            await this.job(id, "finalize", () =>
+              this.chain.send({
+                purpose: "finalize",
+                matchId: id,
+                address: this.d.registry,
+                abi: oddraMatchRegistryAbi,
+                functionName: "finalize",
+                args: [id],
+              }),
+            );
+          break;
+        }
+        case ST.Disputed: {
+          this.status.safeState = `The result of match ${id} is under dispute and awaits the arbiter.`;
+          const d = (await this.chain.pub.readContract({
+            address: this.d.registry,
+            abi: oddraMatchRegistryAbi,
+            functionName: "disputes",
+            args: [id],
+          })) as readonly [string, bigint, bigint];
+          if (now > Number(d[2]) + ARBITRATION_WINDOW) await this.void(id);
+          break;
+        }
+        case ST.Settled:
+        case ST.Voided:
           await this.closeBookAndPay(id);
           break;
       }
@@ -224,15 +324,27 @@ export class Scheduler {
     for (const prev of [id - 1n, id - 2n]) {
       const p = this.onchain.get(prev.toString()) ?? (await this.readMatch(prev));
       const ps = slot(prev);
-      if ((p.status === 1 || p.status === 2) && now > ps.kickoff + 120)
+      if ((p.status === ST.Scheduled || p.status === ST.Locked) && now > ps.kickoff + 120)
         return `Paused: match ${prev} has not been revealed. No new bets until it is resolved.`;
-      if (p.status === 3 && now > ps.fullTime + 600) return `Paused: match ${prev} is awaiting settlement.`;
+      if (p.status === ST.Disputed) return `Paused: the result of match ${prev} is under dispute.`;
+      if (
+        (p.status === ST.Revealed || p.status === ST.Proposed) &&
+        now > ps.fullTime + (await this.disputeWindow()) + 600
+      )
+        return `Paused: match ${prev} is awaiting settlement.`;
     }
-    const [free, paused] = await Promise.all([
+    const [free, freeEth, paused] = await Promise.all([
       this.chain.pub.readContract({
         address: this.d.treasury,
         abi: oddraTreasuryAbi,
         functionName: "freeBalance",
+        args: [this.d.usdg],
+      }) as Promise<bigint>,
+      this.chain.pub.readContract({
+        address: this.d.treasury,
+        abi: oddraTreasuryAbi,
+        functionName: "freeBalance",
+        args: [ETH_ADDRESS],
       }) as Promise<bigint>,
       this.chain.pub.readContract({
         address: this.d.book,
@@ -241,7 +353,8 @@ export class Scheduler {
       }) as Promise<boolean>,
     ]);
     if (paused) return "Paused: betting is paused by the operator.";
-    if (free < this.env.minFreeLiquidity) return "Paused: treasury liquidity is below the minimum to open a market.";
+    if (free < this.env.minFreeLiquidity && freeEth < this.env.minFreeLiquidityEth)
+      return "Paused: treasury liquidity is below the minimum to open a market.";
     return null;
   }
 
@@ -335,20 +448,26 @@ export class Scheduler {
       // exposure skew, at most every SKEW_EVERY seconds and never in the final 15 seconds
       if (now - (this.lastSkew.get(key) ?? 0) < SKEW_EVERY || kickoff - now < 15) return;
       this.lastSkew.set(key, now);
-      const [[selection], free] = await Promise.all([
-        this.chain.pub.readContract({
-          address: this.d.book,
-          abi: oddraBookAbi,
-          functionName: "liabilities",
-          args: [id],
-        }) as Promise<readonly [readonly bigint[], readonly bigint[]]>,
-        this.chain.pub.readContract({
-          address: this.d.treasury,
-          abi: oddraTreasuryAbi,
-          functionName: "freeBalance",
-        }) as Promise<bigint>,
-      ]);
-      target = skewForExposure(base, selection, free);
+      // one price for both assets: skew by whichever asset book is more exposed on each selection
+      target = base;
+      for (const asset of [this.d.usdg, ETH_ADDRESS]) {
+        const [[selection], free] = await Promise.all([
+          this.chain.pub.readContract({
+            address: this.d.book,
+            abi: oddraBookAbi,
+            functionName: "liabilities",
+            args: [id, asset],
+          }) as Promise<readonly [readonly bigint[], readonly bigint[]]>,
+          this.chain.pub.readContract({
+            address: this.d.treasury,
+            abi: oddraTreasuryAbi,
+            functionName: "freeBalance",
+            args: [asset],
+          }) as Promise<bigint>,
+        ]);
+        const skewed = skewForExposure(base, selection, free);
+        target = target.map((o, i) => Math.min(o, skewed[i]));
+      }
       if (target.every((o, i) => o === current[i])) return;
     }
     const reason = version === 0 ? "initial" : "exposure";
@@ -421,13 +540,19 @@ export class Scheduler {
   }
 
   private async closeBookAndPay(id: bigint) {
-    const [settled, voided] = (await this.chain.pub.readContract({
-      address: this.d.book,
-      abi: oddraBookAbi,
-      functionName: "bookState",
-      args: [id],
-    })) as readonly [boolean, boolean, number, bigint, bigint, bigint];
-    if (!settled && !voided) {
+    const states = await Promise.all(
+      [this.d.usdg, ETH_ADDRESS].map(
+        (asset) =>
+          this.chain.pub.readContract({
+            address: this.d.book,
+            abi: oddraBookAbi,
+            functionName: "bookState",
+            args: [id, asset],
+          }) as Promise<readonly [boolean, boolean, number, bigint, bigint, bigint]>,
+      ),
+    );
+    // settleBook closes both asset books at once; an empty ETH book closes too
+    if (states.some(([settled, voided]) => !settled && !voided)) {
       await this.job(id, "settleBook", () =>
         this.chain.send({
           purpose: "settleBook",
@@ -524,9 +649,9 @@ export class Scheduler {
       entropy: m.entropy !== zeroHash ? m.entropy : null,
       serverSeed: m.serverSeed !== zeroHash ? m.serverSeed : null,
       finalSeed: m.finalSeed !== zeroHash ? m.finalSeed : null,
-      homeGoals: m.status === 4 ? m.homeGoals : null,
-      awayGoals: m.status === 4 ? m.awayGoals : null,
-      firstScorer: m.status === 4 ? m.firstScorer : null,
+      homeGoals: hasResult(m.status) ? m.homeGoals : null,
+      awayGoals: hasResult(m.status) ? m.awayGoals : null,
+      firstScorer: hasResult(m.status) ? m.firstScorer : null,
       resultHash: m.resultHash !== zeroHash ? m.resultHash : null,
     };
     await db().match.upsert({
@@ -546,7 +671,7 @@ export class Scheduler {
       },
       update: data,
     });
-    if (m.status === 4) {
+    if (m.status === ST.Settled) {
       const mask = winMask(m.homeGoals, m.awayGoals, m.firstScorer);
       await db().bettingMarket.updateMany({ where: { matchId: id, won: null }, data: { won: false } });
       await db().bettingMarket.updateMany({
@@ -558,7 +683,7 @@ export class Scheduler {
 
   private readonly alerted = new Map<string, number>();
 
-  recordError(id: bigint, step: string, e: unknown) {
+  recordError(id: bigint, step: string, e: unknown, severity: "warn" | "critical" = "warn") {
     const error = errMsg(e);
     log.warn("step failed", { matchId: id, step, error });
     this.status.errors.unshift({ at: this.status.chainTime, matchId: id.toString(), step, error: error.slice(0, 300) });
@@ -568,7 +693,7 @@ export class Scheduler {
     if (Date.now() - (this.alerted.get(key) ?? 0) < 300_000) return;
     this.alerted.set(key, Date.now());
     const message = `match ${id} · ${step}: ${error.slice(0, 300)}`;
-    const level = step === "simulate" ? "critical" : "warn";
+    const level = step === "simulate" ? "critical" : severity;
     if (hasDatabase())
       void db()
         .alert.create({ data: { level, source: "scheduler", message } })

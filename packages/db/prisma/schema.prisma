@@ -68,6 +68,8 @@ enum MatchStatus {
   SCHEDULED
   LOCKED
   REVEALED
+  PROPOSED
+  DISPUTED
   SETTLED
   VOIDED
 }
@@ -207,7 +209,8 @@ model Bet {
   bettor    String
   wallet    Wallet   @relation(fields: [bettor], references: [address])
   selection Int
-  stake     Decimal  @db.Decimal(38, 0) // USDG base units
+  asset     String   @default("USDG") // "USDG" | "ETH"
+  stake     Decimal  @db.Decimal(38, 0) // base units of `asset` (6 decimals USDG, 18 ETH)
   odds      Int
   payout    Decimal  @db.Decimal(38, 0)
   state     BetState @default(OPEN)
@@ -239,6 +242,7 @@ model Claim {
   bet       Bet      @relation(fields: [betId], references: [id])
   bettor    String
   wallet    Wallet   @relation(fields: [bettor], references: [address])
+  asset     String   @default("USDG")
   amount    Decimal  @db.Decimal(38, 0)
   caller    String
   automatic Boolean
@@ -256,6 +260,7 @@ model Claim {
 model TreasuryTransaction {
   id          Int      @id @default(autoincrement())
   kind        String // contribution | stake | payout | withdrawal | reserve | release
+  asset       String   @default("USDG")
   source      String?
   account     String?
   amount      Decimal  @db.Decimal(38, 0)
@@ -299,6 +304,7 @@ model TokenConversion {
 model TreasurySnapshot {
   id            Int      @id @default(autoincrement())
   takenAt       DateTime @default(now())
+  asset         String   @default("USDG")
   blockNumber   BigInt
   balance       Decimal  @db.Decimal(38, 0)
   reserved      Decimal  @db.Decimal(38, 0)
@@ -308,7 +314,7 @@ model TreasurySnapshot {
   totalContributed Decimal @db.Decimal(38, 0)
   totalWithdrawn Decimal @db.Decimal(38, 0)
 
-  @@index([takenAt])
+  @@index([asset, takenAt])
 }
 
 // ---------------------------------------------------------------- operations

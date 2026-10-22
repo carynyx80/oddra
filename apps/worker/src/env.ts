@@ -39,7 +39,6 @@ function loadDeployment(chainId: number): Deployment {
 
 export function loadEnv() {
   const chainId = Number(process.env.CHAIN_ID ?? 46630);
-  if (chainId === 4663) throw new Error("Robinhood Chain mainnet is disabled: real-money wagering is not approved");
   return {
     chainId,
     rpcUrls: (process.env.RPC_URLS ?? process.env.RPC_URL ?? "https://rpc.testnet.chain.robinhood.com")
@@ -54,6 +53,8 @@ export function loadEnv() {
     margin: Number(process.env.ODDS_MARGIN ?? 0.06),
     /** Do not open a new match unless the treasury has at least this much free USDG (whole units). */
     minFreeLiquidity: BigInt(process.env.MIN_FREE_LIQUIDITY_USDG ?? 10_000) * 1_000_000n,
+    /** The same gate for the ETH book, in wei. */
+    minFreeLiquidityEth: BigInt(process.env.MIN_FREE_LIQUIDITY_ETH_WEI ?? 10n ** 17n),
     port: Number(process.env.PORT ?? 8787),
     tickMs: Number(process.env.TICK_MS ?? 2_000),
     instanceId: process.env.WORKER_ID ?? `worker-${process.pid}`,

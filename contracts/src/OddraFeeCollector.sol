@@ -24,7 +24,8 @@ interface ISwapAdapter {
 
 /// @title OddraFeeCollector
 /// @notice The $ODRA creator-fee recipient. Every asset it receives can only go one way: into the sportsbook treasury,
-///         as USDG, recorded on-chain as a creator-fee contribution.
+///         recorded on-chain as a creator-fee contribution. ETH is itself a betting asset, so fees paid in ETH are
+///         forwarded as ETH; an optional audited adapter can convert some of it to USDG instead.
 contract OddraFeeCollector is AccessControlDefaultAdminRules, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -39,11 +40,13 @@ contract OddraFeeCollector is AccessControlDefaultAdminRules, ReentrancyGuard {
     uint256 public totalEthReceived;
     uint256 public totalEthConverted;
     uint256 public totalUsdgForwarded;
+    uint256 public totalEthForwarded;
 
     event EthReceived(address indexed from, uint256 amount);
     event EscrowClaimed(uint256 amount);
     event Converted(uint256 ethIn, uint256 usdgOut, uint256 minOut);
     event Forwarded(uint256 amount);
+    event ForwardedETH(uint256 amount);
     event FeeEscrowSet(address escrow);
     event SwapAdapterSet(address adapter);
 
@@ -101,8 +104,17 @@ contract OddraFeeCollector is AccessControlDefaultAdminRules, ReentrancyGuard {
         amount = usdg.balanceOf(address(this));
         if (amount == 0) return 0;
         usdg.forceApprove(address(treasury), amount);
-        treasury.contribute(amount, treasury.SOURCE_CREATOR_FEES());
+        treasury.contribute(address(usdg), amount, treasury.SOURCE_CREATOR_FEES());
         totalUsdgForwarded += amount;
         emit Forwarded(amount);
+    }
+
+    /// @notice Send every wei held here to the treasury's ETH book as a creator-fee contribution. Anyone may call.
+    function forwardETH() external nonReentrant returns (uint256 amount) {
+        amount = address(this).balance;
+        if (amount == 0) return 0;
+        treasury.contribute{value: amount}(address(0), amount, treasury.SOURCE_CREATOR_FEES());
+        totalEthForwarded += amount;
+        emit ForwardedETH(amount);
     }
 }

@@ -6,7 +6,9 @@ import {
 } from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 
 /// @title OddraRiskManager
-/// @notice Betting limits and solvency rules. Changes apply to new bets only; accepted bets are never touched.
+/// @notice Betting limits and solvency rules, one set per betting asset (USDG and native ETH = address(0), in that
+///         asset's own units). Changes apply to new bets only; accepted bets are never touched. An asset with no
+///         limits set cannot be bet.
 contract OddraRiskManager is AccessControlDefaultAdminRules {
     bytes32 public constant RISK_ROLE = keccak256("RISK_ROLE");
 
@@ -26,9 +28,9 @@ contract OddraRiskManager is AccessControlDefaultAdminRules {
         uint16 maxPayoutOfFreeBps;
     }
 
-    Limits public limits;
+    mapping(address asset => Limits) public limits;
 
-    event LimitsUpdated(Limits limits);
+    event LimitsUpdated(address indexed asset, Limits limits);
 
     error StakeOutOfRange(uint256 stake);
     error PayoutTooHigh(uint256 payout, uint256 max);
@@ -37,22 +39,28 @@ contract OddraRiskManager is AccessControlDefaultAdminRules {
     error TotalLiabilityTooHigh(uint256 reserved, uint256 max);
     error ReserveBreached(uint256 free, uint256 minFree);
     error BadLimits();
+    error AssetNotEnabled(address asset);
 
-    constructor(address admin, Limits memory initial) AccessControlDefaultAdminRules(1 days, admin) {
-        _set(initial);
+    constructor(address admin, address[] memory assets, Limits[] memory initial)
+        AccessControlDefaultAdminRules(1 days, admin)
+    {
+        if (assets.length != initial.length) revert BadLimits();
+        for (uint256 i = 0; i < assets.length; i++) {
+            _set(assets[i], initial[i]);
+        }
     }
 
-    function setLimits(Limits calldata next) external onlyRole(RISK_ROLE) {
-        _set(next);
+    function setLimits(address asset, Limits calldata next) external onlyRole(RISK_ROLE) {
+        _set(asset, next);
     }
 
-    function _set(Limits memory l) internal {
+    function _set(address asset, Limits memory l) internal {
         if (
             l.minStake == 0 || l.maxStake < l.minStake || l.maxPayout < l.maxStake || l.maxTotalLiabilityBps > 10_000
                 || l.maxPayoutOfFreeBps > 10_000 || l.maxPayoutOfFreeBps == 0
         ) revert BadLimits();
-        limits = l;
-        emit LimitsUpdated(l);
+        limits[asset] = l;
+        emit LimitsUpdated(asset, l);
     }
 
     /// @notice Reverts unless a bet keeps the book within every limit.
@@ -60,6 +68,7 @@ contract OddraRiskManager is AccessControlDefaultAdminRules {
     /// @param balanceAfter treasury balance including this stake
     /// @param reservedAfter total reserved after this bet's reservation
     function check(
+        address asset,
         uint256 stake,
         uint256 payout,
         uint256 selectionLiability,
@@ -68,7 +77,8 @@ contract OddraRiskManager is AccessControlDefaultAdminRules {
         uint256 balanceAfter,
         uint256 reservedAfter
     ) external view {
-        Limits memory l = limits;
+        Limits memory l = limits[asset];
+        if (l.minStake == 0) revert AssetNotEnabled(asset);
         if (stake < l.minStake || stake > l.maxStake) revert StakeOutOfRange(stake);
         uint256 maxPay = l.maxPayout;
         uint256 exposureCap = (freeBefore * l.maxPayoutOfFreeBps) / 10_000;

@@ -42,6 +42,8 @@ abstract contract Base is Test {
     address internal keeper = makeAddr("keeper");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
+    address internal arbiter = makeAddr("arbiter");
+    address internal constant ETH = address(0);
 
     MockUSDG internal usdg;
     OddraMatchRegistry internal registry;
@@ -60,12 +62,20 @@ abstract contract Base is Test {
         usdg = new MockUSDG();
         registry = new OddraMatchRegistry(admin, IBlockSource(address(new NativeBlockSource())));
         treasury = new OddraTreasury(admin, IERC20(address(usdg)));
-        risk = new OddraRiskManager(admin, defaultLimits());
+        address[] memory assets = new address[](2);
+        assets[0] = address(usdg);
+        assets[1] = ETH;
+        OddraRiskManager.Limits[] memory lims = new OddraRiskManager.Limits[](2);
+        lims[0] = defaultLimits();
+        lims[1] = ethLimits();
+        risk = new OddraRiskManager(admin, assets, lims);
         book = new OddraBook(admin, IERC20(address(usdg)), registry, treasury, risk);
         collector = new OddraFeeCollector(admin, IERC20(address(usdg)), treasury);
 
         vm.startPrank(admin);
         registry.grantRole(registry.OPERATOR_ROLE(), operator);
+        registry.grantRole(registry.ARBITER_ROLE(), arbiter);
+        registry.setDisputeParams(10 minutes, 0.005 ether, address(treasury));
         book.grantRole(book.OPERATOR_ROLE(), operator);
         book.grantRole(book.PAUSER_ROLE(), admin);
         treasury.grantRole(treasury.BOOK_ROLE(), address(book));
@@ -78,7 +88,9 @@ abstract contract Base is Test {
         usdg.mint(admin, 100_000 * U);
         vm.startPrank(admin);
         usdg.approve(address(treasury), type(uint256).max);
-        treasury.contribute(100_000 * U, treasury.SOURCE_HOUSE());
+        treasury.contribute(address(usdg), 100_000 * U, treasury.SOURCE_HOUSE());
+        vm.deal(admin, 100 ether);
+        treasury.contribute{value: 100 ether}(ETH, 100 ether, treasury.SOURCE_HOUSE());
         vm.stopPrank();
 
         for (uint256 i = 0; i < 2; i++) {
@@ -86,7 +98,21 @@ abstract contract Base is Test {
             usdg.mint(who, 10_000 * U);
             vm.prank(who);
             usdg.approve(address(book), type(uint256).max);
+            vm.deal(who, 10 ether);
         }
+    }
+
+    function ethLimits() internal pure returns (OddraRiskManager.Limits memory) {
+        return OddraRiskManager.Limits({
+            minStake: 0.0001 ether,
+            maxStake: 1 ether,
+            maxPayout: 20 ether,
+            maxSelectionLiability: 50 ether,
+            maxMatchLiability: 60 ether,
+            minFreeReserve: 1 ether,
+            maxTotalLiabilityBps: 9_000,
+            maxPayoutOfFreeBps: 5_000
+        });
     }
 
     function defaultLimits() internal pure returns (OddraRiskManager.Limits memory) {
@@ -124,8 +150,20 @@ abstract contract Base is Test {
         return book.placeBet(id, sel, uint128(stake), 0);
     }
 
-    /// @dev Locks, reveals and settles match `id` with the given result.
+    function betEth(address who, uint256 id, uint8 sel, uint256 stake) internal returns (uint256) {
+        vm.prank(who);
+        return book.placeBetETH{value: stake}(id, sel, 0);
+    }
+
+    /// @dev Locks, reveals, proposes the result, and finalises it after the dispute window.
     function finish(uint256 id, uint8 h, uint8 a, uint8 first) internal {
+        propose(id, h, a, first);
+        vm.warp(block.timestamp + registry.disputeWindow());
+        registry.finalize(id);
+    }
+
+    /// @dev Locks, reveals and proposes a result (left open to disputes).
+    function propose(uint256 id, uint8 h, uint8 a, uint8 first) internal {
         OddraMatchRegistry.Match memory m = registry.getMatch(id);
         vm.warp(m.kickoff);
         registry.lock(id);
@@ -135,11 +173,12 @@ abstract contract Base is Test {
         registry.reveal(id, SEED);
         vm.warp(m.kickoff + registry.LIVE_DURATION());
         vm.prank(operator);
-        registry.settle(id, h, a, first, keccak256("result"));
+        registry.proposeResult(id, h, a, first, keccak256("result"));
     }
 
     /// @dev Solvency: the treasury always holds at least everything it has reserved.
     function assertSolvent() internal view {
-        assertGe(usdg.balanceOf(address(treasury)), treasury.totalReserved(), "treasury insolvent");
+        assertGe(usdg.balanceOf(address(treasury)), treasury.totalReserved(address(usdg)), "USDG insolvent");
+        assertGe(address(treasury).balance, treasury.totalReserved(ETH), "ETH insolvent");
     }
 }

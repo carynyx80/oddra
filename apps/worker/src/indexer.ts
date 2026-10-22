@@ -5,6 +5,8 @@ import {
   oddraFeeCollectorAbi,
   oddraMatchRegistryAbi,
   oddraTreasuryAbi,
+  ETH_ADDRESS,
+  isEth,
   selectionWins,
 } from "@oddra/shared";
 import type { Chain } from "./chain";
@@ -118,6 +120,7 @@ export class Indexer {
             matchId: a.matchId,
             bettor,
             selection: Number(a.selection),
+            asset: assetKey(a.asset),
             stake: a.stake.toString(),
             odds: Number(a.odds),
             payout: a.payout.toString(),
@@ -128,13 +131,23 @@ export class Indexer {
           },
           update: {},
         });
-        await this.treasuryRow("stake", null, bettor, a.stake, txHash, logIndex, blockNumber, createdAt);
+        await this.treasuryRow(
+          "stake",
+          assetKey(a.asset),
+          null,
+          bettor,
+          a.stake,
+          txHash,
+          logIndex,
+          blockNumber,
+          createdAt,
+        );
         break;
       }
       case "book.BookSettled": {
         const mask = Number(a.winMask);
         const bets = await prisma.bet.findMany({
-          where: { matchId: a.matchId },
+          where: { matchId: a.matchId, asset: assetKey(a.asset) },
           select: { id: true, selection: true, payout: true, state: true },
         });
         for (const b of bets) {
@@ -151,7 +164,7 @@ export class Indexer {
       }
       case "book.BookVoided": {
         const bets = await prisma.bet.findMany({
-          where: { matchId: a.matchId },
+          where: { matchId: a.matchId, asset: assetKey(a.asset) },
           select: { id: true, stake: true, state: true },
         });
         for (const b of bets) {
@@ -174,6 +187,7 @@ export class Indexer {
             create: {
               betId: a.betId,
               bettor,
+              asset: assetKey(a.asset),
               amount: a.amount.toString(),
               caller: (a.caller as string).toLowerCase(),
               automatic: (a.caller as string).toLowerCase() !== bettor,
@@ -200,6 +214,7 @@ export class Indexer {
       case "treasury.Contributed":
         await this.treasuryRow(
           "contribution",
+          assetKey(a.asset),
           decodeSource(a.source),
           (a.from as string).toLowerCase(),
           a.amount,
@@ -212,6 +227,7 @@ export class Indexer {
       case "treasury.Paid":
         await this.treasuryRow(
           "payout",
+          assetKey(a.asset),
           null,
           (a.to as string).toLowerCase(),
           a.amount,
@@ -224,6 +240,7 @@ export class Indexer {
       case "treasury.Withdrawn":
         await this.treasuryRow(
           "withdrawal",
+          assetKey(a.asset),
           null,
           (a.to as string).toLowerCase(),
           a.amount,
@@ -255,6 +272,30 @@ export class Indexer {
           update: {},
         });
         break;
+      case "feeCollector.ForwardedETH":
+        await prisma.creatorFeeReceipt.upsert({
+          where: { txHash_logIndex: { txHash, logIndex } },
+          create: {
+            asset: "ETH_TO_TREASURY",
+            amount: a.amount.toString(),
+            from: null,
+            txHash,
+            logIndex,
+            blockNumber,
+            createdAt,
+          },
+          update: {},
+        });
+        break;
+      case "registry.ResultDisputed":
+        await prisma.alert.create({
+          data: {
+            level: "critical",
+            source: "disputes",
+            message: `The result of match ${a.matchId} was disputed by ${a.disputer}. The arbiter must rule within 24 hours or the match is voided.`,
+          },
+        });
+        break;
       case "feeCollector.Converted":
         await prisma.tokenConversion.upsert({
           where: { txHash_logIndex: { txHash, logIndex } },
@@ -275,6 +316,7 @@ export class Indexer {
 
   private async treasuryRow(
     kind: string,
+    asset: string,
     source: string | null,
     account: string | null,
     amount: bigint,
@@ -285,12 +327,12 @@ export class Indexer {
   ) {
     await db().treasuryTransaction.upsert({
       where: { txHash_logIndex: { txHash, logIndex } },
-      create: { kind, source, account, amount: amount.toString(), txHash, logIndex, blockNumber, createdAt },
+      create: { kind, asset, source, account, amount: amount.toString(), txHash, logIndex, blockNumber, createdAt },
       update: {},
     });
   }
 
-  /** Hourly-ish snapshot of the on-chain treasury totals for the charts. */
+  /** Snapshot of the on-chain treasury totals for each asset, every 10 minutes, for the charts. */
   async snapshot() {
     const prisma = db();
     const last = await prisma.treasurySnapshot.findFirst({ orderBy: { takenAt: "desc" } });
@@ -305,26 +347,40 @@ export class Indexer {
       "totalContributed",
       "totalWithdrawn",
     ] as const;
-    const [blockNumber, ...vals] = await Promise.all([
-      this.chain.pub.getBlockNumber({ cacheTime: 0 }),
-      ...fns.map(
-        (fn) => this.chain.pub.readContract({ address: t, abi: oddraTreasuryAbi, functionName: fn }) as Promise<bigint>,
-      ),
-    ]);
-    await prisma.treasurySnapshot.create({
-      data: {
-        blockNumber,
-        balance: vals[0].toString(),
-        reserved: vals[1].toString(),
-        totalStakes: vals[2].toString(),
-        totalPayouts: vals[3].toString(),
-        totalCreatorFees: vals[4].toString(),
-        totalContributed: vals[5].toString(),
-        totalWithdrawn: vals[6].toString(),
-      },
-    });
+    const blockNumber = await this.chain.pub.getBlockNumber({ cacheTime: 0 });
+    for (const [key, address] of [
+      ["USDG", this.env.deployment.usdg],
+      ["ETH", ETH_ADDRESS],
+    ] as const) {
+      const vals = await Promise.all(
+        fns.map(
+          (fn) =>
+            this.chain.pub.readContract({
+              address: t,
+              abi: oddraTreasuryAbi,
+              functionName: fn,
+              args: [address],
+            }) as Promise<bigint>,
+        ),
+      );
+      await prisma.treasurySnapshot.create({
+        data: {
+          asset: key,
+          blockNumber,
+          balance: vals[0].toString(),
+          reserved: vals[1].toString(),
+          totalStakes: vals[2].toString(),
+          totalPayouts: vals[3].toString(),
+          totalCreatorFees: vals[4].toString(),
+          totalContributed: vals[5].toString(),
+          totalWithdrawn: vals[6].toString(),
+        },
+      });
+    }
   }
 }
+
+const assetKey = (a: unknown) => (isEth(String(a)) ? "ETH" : "USDG");
 
 function decodeSource(b: string): string {
   const hex = b.replace(/^0x/, "").replace(/(00)+$/, "");

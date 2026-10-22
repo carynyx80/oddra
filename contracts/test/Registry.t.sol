@@ -88,7 +88,7 @@ contract RegistryTest is Base {
         registry.reveal(1, SEED);
     }
 
-    function test_SettleOnlyAfterFullTimeAndOnce() public {
+    function test_ProposeOnlyAfterFullTimeAndOnce() public {
         (, uint64 kickoff) = openMatch(1, flatOdds(200));
         vm.warp(kickoff);
         registry.lock(1);
@@ -97,18 +97,18 @@ contract RegistryTest is Base {
         registry.reveal(1, SEED);
         vm.prank(operator);
         vm.expectRevert(OddraMatchRegistry.TooEarly.selector);
-        registry.settle(1, 1, 0, 1, keccak256("r"));
+        registry.proposeResult(1, 1, 0, 1, keccak256("r"));
         vm.warp(kickoff + 900);
         vm.prank(operator);
         vm.expectRevert(OddraMarkets.InvalidResult.selector);
-        registry.settle(1, 1, 0, 2, keccak256("r"));
+        registry.proposeResult(1, 1, 0, 2, keccak256("r"));
         vm.prank(operator);
-        registry.settle(1, 1, 0, 1, keccak256("r"));
+        registry.proposeResult(1, 1, 0, 1, keccak256("r"));
         vm.prank(operator);
         vm.expectRevert(
-            abi.encodeWithSelector(OddraMatchRegistry.BadStatus.selector, OddraMatchRegistry.Status.Settled)
+            abi.encodeWithSelector(OddraMatchRegistry.BadStatus.selector, OddraMatchRegistry.Status.Proposed)
         );
-        registry.settle(1, 0, 1, 2, keccak256("r2"));
+        registry.proposeResult(1, 0, 1, 2, keccak256("r2"));
     }
 
     function test_AnyoneVoidsAfterMissedReveal() public {

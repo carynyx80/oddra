@@ -220,7 +220,7 @@ contract BookTest is Base {
         usdg.setBlocked(alice, false);
         book.claim(a);
         assertEq(uint8(book.betStatus(a)), uint8(OddraBook.BetStatus.Paid));
-        (,,,, uint256 reserved, uint256 owed) = book.bookState(1);
+        (,,,, uint256 reserved, uint256 owed) = book.bookState(1, address(usdg));
         assertEq(reserved, 0);
         assertEq(owed, 0);
     }
@@ -239,7 +239,7 @@ contract BookTest is Base {
         book.claim(b);
         assertEq(usdg.balanceOf(alice) - a0, 10 * U);
         assertEq(usdg.balanceOf(bob) - b0, 5 * U);
-        assertEq(treasury.totalReserved(), 0);
+        assertEq(treasury.totalReserved(address(usdg)), 0);
     }
 
     // ------------------------------------------------------------------ treasury and risk
@@ -250,7 +250,7 @@ contract BookTest is Base {
         bet(alice, 1, OVER, 100 * U); // 200
         bet(alice, 1, cs(3, 1), 100 * U); // 200
         // a 3-1 home win pays all three at once
-        assertEq(treasury.totalReserved(), 600 * U);
+        assertEq(treasury.totalReserved(address(usdg)), 600 * U);
     }
 
     function test_MutuallyExclusiveOutcomesReserveOnlyTheWorst() public {
@@ -258,7 +258,7 @@ contract BookTest is Base {
         bet(alice, 1, HOME, 100 * U); // 250
         bet(bob, 1, AWAY, 100 * U); // 250
         // only one can win, but refunds (200) must also be covered: max(250, 200)
-        assertEq(treasury.totalReserved(), 250 * U);
+        assertEq(treasury.totalReserved(address(usdg)), 250 * U);
     }
 
     function test_ReservationNeverBelowTotalStakesForRefunds() public {
@@ -266,7 +266,7 @@ contract BookTest is Base {
         bet(alice, 1, HOME, 100 * U);
         bet(bob, 1, AWAY, 100 * U);
         bet(bob, 1, DRAW, 100 * U);
-        assertEq(treasury.totalReserved(), 300 * U);
+        assertEq(treasury.totalReserved(address(usdg)), 300 * U);
     }
 
     function test_SettlementReleasesTheUnneededReserve() public {
@@ -275,7 +275,7 @@ contract BookTest is Base {
         bet(bob, 1, AWAY, 100 * U);
         finish(1, 0, 0, 0);
         book.settleBook(1);
-        assertEq(treasury.totalReserved(), 0);
+        assertEq(treasury.totalReserved(address(usdg)), 0);
         assertEq(book.claimable(a), 0);
         assertSolvent();
     }
@@ -283,25 +283,25 @@ contract BookTest is Base {
     function test_AdminCannotWithdrawReservedFunds() public {
         openMatch(1, flatOdds(200));
         bet(alice, 1, HOME, 500 * U);
-        uint256 free = treasury.freeBalance();
+        uint256 free = treasury.freeBalance(address(usdg));
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(OddraTreasury.ExceedsFree.selector, free, free + 1));
-        treasury.withdraw(admin, free + 1);
+        vm.expectRevert(abi.encodeWithSelector(OddraTreasury.ExceedsFree.selector, address(usdg), free, free + 1));
+        treasury.withdraw(address(usdg), admin, free + 1);
         vm.prank(admin);
-        treasury.withdraw(admin, free);
-        assertEq(treasury.freeBalance(), 0);
+        treasury.withdraw(address(usdg), admin, free);
+        assertEq(treasury.freeBalance(address(usdg)), 0);
         assertSolvent();
     }
 
     function test_RejectsBetTheTreasuryCannotCover() public {
         // drain the treasury down to a small free balance
         vm.prank(admin);
-        treasury.withdraw(admin, 98_500 * U);
+        treasury.withdraw(address(usdg), admin, 98_500 * U);
         openMatch(1, flatOdds(1000));
         vm.prank(alice);
         vm.expectRevert(); // payout 1,000 > 50% of 1,500 free
         book.placeBet(1, HOME, uint128(100 * U), 0);
-        assertEq(treasury.totalReserved(), 0);
+        assertEq(treasury.totalReserved(address(usdg)), 0);
     }
 
     function test_StakeLimits() public {
@@ -318,7 +318,7 @@ contract BookTest is Base {
         OddraRiskManager.Limits memory l = defaultLimits();
         l.maxMatchLiability = uint128(1_000 * U);
         vm.prank(admin);
-        risk.setLimits(l);
+        risk.setLimits(address(usdg), l);
         openMatch(1, flatOdds(300));
         bet(alice, 1, HOME, 300 * U); // 900
         vm.prank(bob);
@@ -329,10 +329,10 @@ contract BookTest is Base {
 
     function test_CreatorFeesFlowIntoTreasury() public {
         usdg.mint(address(collector), 750 * U);
-        uint256 before = treasury.balance();
+        uint256 before = treasury.balance(address(usdg));
         collector.forward();
-        assertEq(treasury.balance() - before, 750 * U);
-        assertEq(treasury.totalCreatorFees(), 750 * U);
+        assertEq(treasury.balance(address(usdg)) - before, 750 * U);
+        assertEq(treasury.totalCreatorFees(address(usdg)), 750 * U);
         assertEq(collector.totalUsdgForwarded(), 750 * U);
     }
 
@@ -360,14 +360,14 @@ contract BookTest is Base {
     function test_DailyLimitLowersNowRaisesLater() public {
         openMatch(1, flatOdds(200));
         vm.prank(alice);
-        book.setDailyLimit(uint128(20 * U));
+        book.setDailyLimit(address(usdg), uint128(20 * U));
         bet(alice, 1, HOME, 15 * U);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(OddraBook.DailyLimitExceeded.selector, uint128(20 * U)));
         book.placeBet(1, HOME, uint128(10 * U), 0);
         vm.prank(alice);
-        book.setDailyLimit(uint128(1_000 * U)); // raise: pending for 24h
-        assertEq(book.dailyLimit(alice), 20 * U);
+        book.setDailyLimit(address(usdg), uint128(1_000 * U)); // raise: pending for 24h
+        assertEq(book.dailyLimit(alice, address(usdg)), 20 * U);
     }
 
     // ------------------------------------------------------------------ fuzzed solvency
@@ -411,6 +411,6 @@ contract BookTest is Base {
             }
             assertSolvent();
         }
-        assertEq(treasury.totalReserved(), 0);
+        assertEq(treasury.totalReserved(address(usdg)), 0);
     }
 }

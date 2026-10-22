@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { DT, GAME_SECONDS_PER_REAL_SECOND, type MatchEvent } from "@oddra/engine";
-import { commentary, phaseOf, slot, slotAt } from "@oddra/shared";
+import { commentary, isRevealed, phaseOf, slot, slotAt } from "@oddra/shared";
 import type { Scheduler } from "./scheduler";
 import { STATUS } from "./scheduler";
 import { log } from "./log";
@@ -72,7 +72,7 @@ export class LiveHub {
         fullTime: s.fullTime,
         homeTeam: m?.homeTeam ?? null,
         awayTeam: m?.awayTeam ?? null,
-        finalSeed: m && m.status >= 3 ? m.finalSeed : null,
+        finalSeed: m && isRevealed(m.status) ? m.finalSeed : null,
         score: last ? [last.home, last.away] : [0, 0],
         minute: last ? Math.min(90, Math.floor(last.tick / 600) + 1) : 0,
       };
