@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/oddra-logo-transparent-white.svg">
+    <img alt="Oddra" src="brand/oddra-logo-transparent-black.svg" width="360">
+  </picture>
+</p>
+
 # Oddra
 
 **Every Match. Every Moment. Onchain.**
