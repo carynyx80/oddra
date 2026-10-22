@@ -4,14 +4,16 @@ The question this answers: **can the operator choose a match result after seeing
 
 ## Commit, then entropy, then reveal
 
-| Step             | When                                                                                | What becomes fixed                                                                                                                  | Who acts |
-| ---------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| 1. `createMatch` | Before the betting window opens (the contract rejects `openTime < block.timestamp`) | `configHash` (teams, every player attribute, formations, engine ruleset) and `seedCommit = keccak256(serverSeed)`                   | Operator |
-| 2. Betting       | `openTime ≤ t < kickoff`, enforced by block timestamp                               | Each bet's selection, stake and exact odds                                                                                          | Bettors  |
-| 3. `lock`        | Any time after kickoff                                                              | `entropyBlock = ArbSys.arbBlockNumber() + 4`, an L2 block that does not exist yet                                                   | Anyone   |
-| 4. `reveal`      | After `entropyBlock`, within 256 blocks                                             | `entropy = arbBlockHash(entropyBlock)`, `finalSeed = keccak256(serverSeed ‖ entropy ‖ matchId)`; the seed must match the commitment | Operator |
-| 5. Replay        | Immediately                                                                         | The whole match (every position, event and statistic) is a pure function of `(config, finalSeed)`                                   | Anyone   |
-| 6. `settle`      | After `kickoff + 900 s`                                                             | Score, first scorer and `resultHash` (binds score, stats, event log and every frame)                                                | Operator |
+| Step               | When                                                                                | What becomes fixed                                                                                                                                                                                                                          | Who acts            |
+| ------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| 1. `createMatch`   | Before the betting window opens (the contract rejects `openTime < block.timestamp`) | `configHash` (teams, every player attribute, formations, engine ruleset) and `seedCommit = keccak256(serverSeed)`                                                                                                                           | Operator            |
+| 2. Betting         | `openTime ≤ t < kickoff`, enforced by block timestamp                               | Each bet's selection, stake and exact odds                                                                                                                                                                                                  | Bettors             |
+| 3. `lock`          | Any time after kickoff                                                              | `entropyBlock = ArbSys.arbBlockNumber() + 4`, an L2 block that does not exist yet                                                                                                                                                           | Anyone              |
+| 4. `reveal`        | After `entropyBlock`, within 256 blocks                                             | `entropy = arbBlockHash(entropyBlock)`, `finalSeed = keccak256(serverSeed ‖ entropy ‖ matchId)`; the seed must match the commitment                                                                                                         | Operator            |
+| 5. Replay          | Immediately                                                                         | The whole match (every position, event and statistic) is a pure function of `(config, finalSeed)`                                                                                                                                           | Anyone              |
+| 6. `proposeResult` | After `kickoff + 900 s`                                                             | Score, first scorer and `resultHash` (binds score, stats, event log and every frame), **not yet final**                                                                                                                                     | Operator            |
+| 7. Dispute window  | 10 minutes after the proposal                                                       | Anyone whose replay disagrees calls `dispute` with an ETH bond; an **arbiter** (a key separate from the operator) rules. Bond returned if the result changes, forfeited to the treasury if not. No ruling in 24 h → void, everyone refunded | Anyone / arbiter    |
+| 8. `finalize`      | After an undisputed window                                                          | The result becomes final; books settle and winners are paid                                                                                                                                                                                 | Anyone (the worker) |
 
 The server seed is committed before any bet exists, and the entropy is the hash of a block produced after betting has
 closed, so at the moment the operator commits, the outcome is unknowable to everyone, including the operator. On
@@ -24,10 +26,12 @@ are the same simulation.
 
 ## Trust assumptions (read these before using real money)
 
-1. **The engine runs off-chain.** The registry checks the seed but cannot re-run 54,000 simulation steps, so it
-   accepts the operator's posted score. A wrong score is _publicly provable_ (anyone can replay it) but _not rejected
-   on-chain_. Closing this gap needs an on-chain verifier, a validity proof (zkVM) of the engine, or an optimistic
-   challenge game with bonded operators. Until one exists, real-money settlement must stay disabled.
+1. **The engine runs off-chain.** The registry checks the seed but cannot re-run 54,000 simulation steps. A wrong
+   score is publicly provable (anyone can replay it), and the dispute window gives everyone 10 minutes to challenge it
+   before it pays out, but the final word on a dispute belongs to the arbiter key. The guarantee is only as strong as
+   the arbiter's independence from the operator: on mainnet use a different person or a multisig. The worker itself
+   refuses to finalise any proposal that differs from its own replay and raises a critical alert. A validity proof of
+   the engine would remove the arbiter entirely.
 2. **Withholding.** Once the entropy block exists, the operator can compute the result before revealing. If it never
    reveals (or never settles), anyone can void the match after the deadline and every stake is refunded. Refunds cost
    the operator nothing, so withholding is a free option on bad outcomes; a production version should bond the

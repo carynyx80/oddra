@@ -7,8 +7,9 @@ on-chain, opens for five minutes of betting in USDG, then plays out as a 15-minu
 The result is reproducible by anyone from on-chain data, the settlement contract resolves every market, and winners
 are paid automatically (or claim themselves).
 
-> **Testnet software. Real-money wagering is disabled** and stays disabled until licensing, compliance and security
-> approvals are complete. The testnet uses a labelled, no-value test USDG. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
+> Bets are placed and paid in **USDG or native ETH**. The contracts deploy to Robinhood Chain **mainnet** (real funds)
+> or testnet (labelled no-value test USDG). Licensing, audit and the operator's legal obligations are the operator's
+> responsibility; see [docs/COMPLIANCE.md](docs/COMPLIANCE.md) and [docs/MAINNET.md](docs/MAINNET.md).
 
 ---
 
@@ -58,8 +59,9 @@ enforced by the contract against `block.timestamp`; browsers sync to the latest 
 4. Every browser replays the match from `finalSeed` in a Web Worker (~150 ms) and draws the frame for the current chain
    time, so all viewers see the same moment; late joiners land on the right minute, refreshes and reconnects are
    harmless. The worker's WebSocket feed adds commentary/events with sequence numbers for de-duplication.
-5. At full time the worker settles the score and `resultHash`, closes the book (releasing unneeded reserve), and pays
-   winners in batches. A failed transfer leaves the bet claimable; claims never pause.
+5. At full time the worker proposes the score and `resultHash`. After a 10-minute dispute window (anyone may dispute
+   with a bond; an independent arbiter rules) it finalises, closes both asset books (releasing unneeded reserve), and
+   pays winners in batches in the asset they staked. A failed transfer leaves the bet claimable; claims never pause.
 6. If anything stalls (no reveal, no settlement, low liquidity, paused book), no new market opens and the UI shows a
    safe-state banner; missed reveals/settlements become voids that refund every stake, callable by anyone.
 
