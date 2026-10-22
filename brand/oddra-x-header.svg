@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500" width="1500" height="500">
+<defs>
+  <radialGradient id="glow" cx="1290" cy="200" r="400" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#B8FF65" stop-opacity=".16"/><stop offset="1" stop-color="#B8FF65" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="fade" x1="0" x2="1" y1="0" y2="0">
+    <stop offset="0" stop-color="#050505"/><stop offset=".55" stop-color="#050505" stop-opacity=".55"/><stop offset="1" stop-color="#050505" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="trail" x1="0" x2="1" y1="1" y2="0">
+    <stop offset="0" stop-color="#B8FF65" stop-opacity="0"/><stop offset="1" stop-color="#B8FF65" stop-opacity=".55"/>
+  </linearGradient>
+</defs>
+<rect width="1500" height="500" fill="#050505"/>
+<rect x="0" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="150" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="300" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="450" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="600" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="750" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="900" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="1050" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="1200" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/><rect x="1350" y="0" width="75" height="500" fill="#FFFFFF" opacity=".018"/>
+<rect width="1500" height="500" fill="url(#glow)"/>
+<!-- the mark, as the pitch: centre circle and halfway line -->
+<g fill="none" stroke="#FFFFFF" stroke-opacity=".13" stroke-width="6">
+  <circle cx="1300" cy="250" r="175"/>
+  <path d="M1300 -10V510"/>
+  <circle cx="1300" cy="250" r="7" fill="#FFFFFF" fill-opacity=".14" stroke="none"/>
+  
+</g>
+<!-- the ball, with its flight path -->
+<path d="M1160 480 Q1300 380 1410 120" fill="none" stroke="url(#trail)" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 14"/>
+<circle cx="1410" cy="112" r="60" fill="#B8FF65" fill-opacity=".10"/>
+<circle cx="1410" cy="112" r="36" fill="#B8FF65"/>
+<rect width="1500" height="500" fill="url(#fade)"/>
+<!-- message -->
+<g transform="translate(440 132) scale(1.55)"><g fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="20" cy="20" r="16.5"/>
+  <path d="M55.5 3.5V36.5H65.5A16.5 16.5 0 0 0 65.5 3.5Z"/>
+  <path d="M101 3.5V36.5H111A16.5 16.5 0 0 0 111 3.5Z"/>
+  <path d="M146.5 36.5V3.5H158.5A9.25 9.25 0 0 1 158.5 22H146.5M159 22L170.5 36.5"/>
+  <path d="M189.5 36.5L204.5 3.5L219.5 36.5M195.4 25H213.6"/>
+</g></g>
+<text x="442" y="262" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="40" font-weight="600" fill="#FFFFFF" letter-spacing="-0.5">Every match. Every moment. <tspan fill="#B8FF65">Onchain.</tspan></text>
+<text x="443" y="306" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="21" fill="#92929D">Provably fair virtual football · back or lay in USDG &amp; ETH · Robinhood Chain</text>
+<g transform="translate(442 342)">
+  <rect width="210" height="58" rx="10" fill="#131316" stroke="#29292F"/>
+  <text x="14" y="36" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="15" font-weight="500" fill="#92929D">HOME</text>
+  <rect x="96" y="9" width="50" height="40" rx="6" fill="#7CC4FF" fill-opacity=".14"/>
+  <text x="121" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#7CC4FF">2.44</text>
+  <rect x="150" y="9" width="50" height="40" rx="6" fill="#FF9FC0" fill-opacity=".14"/>
+  <text x="175" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#FF9FC0">2.46</text>
+</g>
+<g transform="translate(666 342)">
+  <rect width="210" height="58" rx="10" fill="#131316" stroke="#29292F"/>
+  <text x="14" y="36" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="15" font-weight="500" fill="#92929D">DRAW</text>
+  <rect x="96" y="9" width="50" height="40" rx="6" fill="#7CC4FF" fill-opacity=".14"/>
+  <text x="121" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#7CC4FF">2.90</text>
+  <rect x="150" y="9" width="50" height="40" rx="6" fill="#FF9FC0" fill-opacity=".14"/>
+  <text x="175" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#FF9FC0">2.94</text>
+</g>
+<g transform="translate(890 342)">
+  <rect width="210" height="58" rx="10" fill="#131316" stroke="#29292F"/>
+  <text x="14" y="36" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="15" font-weight="500" fill="#92929D">AWAY</text>
+  <rect x="96" y="9" width="50" height="40" rx="6" fill="#7CC4FF" fill-opacity=".14"/>
+  <text x="121" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#7CC4FF">3.26</text>
+  <rect x="150" y="9" width="50" height="40" rx="6" fill="#FF9FC0" fill-opacity=".14"/>
+  <text x="175" y="35" text-anchor="middle" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="17" font-weight="700" fill="#FF9FC0">3.30</text>
+</g>
+</svg>
