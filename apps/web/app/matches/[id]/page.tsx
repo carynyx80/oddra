@@ -10,10 +10,11 @@ import {
   keccakHex,
   resultHash,
 } from "@oddra/engine";
-import { formatClock, phaseOf, slot } from "@oddra/shared";
+import { phaseOf, slot } from "@oddra/shared";
 import { Pitch } from "@/components/Pitch";
 import { Markets } from "@/components/live/Markets";
-import { Commentary, MatchHeader, StatsPanel, Timeline } from "@/components/live/Panels";
+import { EventToast, MatchTabs, Momentum, PossessionBar } from "@/components/live/MatchCentre";
+import { Scoreboard } from "@/components/live/Scoreboard";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink } from "@/components/ui/primitives";
 import { addressUrl, deployment, explorer } from "@/lib/config";
 import { chainNowSync, useChainNow, useMatch, useSimulation } from "@/lib/hooks";
@@ -149,130 +150,136 @@ export default function MatchPage({ params }: { params: Promise<{ id: string }> 
 
   const score: [number, number] | null =
     phase === "live" || phase === "finished" ? (last ? [last.home, last.away] : [0, 0]) : null;
-  const label =
-    v.status === "Voided"
-      ? "Voided"
-      : phase === "finished"
-        ? v.status === "Settled"
-          ? "Full time · settled"
-          : "Full time"
-        : phase === "betting"
-          ? "Betting closes in"
-          : phase === "upcoming"
-            ? "Betting opens in"
-            : "Live";
-  const clock =
-    phase === "betting"
-      ? formatClock(s!.kickoff - now)
-      : phase === "upcoming"
-        ? formatClock(s!.openTime - now)
-        : phase === "live"
-          ? formatClock(s!.fullTime - now)
-          : null;
-
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-        <MatchHeader
-          id={v.id}
-          cfg={cfg}
-          phaseLabel={label}
-          clock={clock}
-          score={score}
-          minute={score ? Math.min(90, Math.floor(shown / 60) + 1) : null}
-          live={isLive && revealed && manual === null}
-          note={error}
-        />
-        <Card className="overflow-hidden">
-          <Pitch
-            config={cfg}
-            result={score ? result : null}
-            preview={previewFrame(cfg)}
-            gameSeconds={() => {
-              if (manual !== null) return pos.current;
-              const n = chainNowSync();
-              if (phase === "finished") return 5400;
-              return s && n !== null ? Math.max(0, Math.min(5400, (n - s.kickoff) * GAME_SECONDS_PER_REAL_SECOND)) : 0;
-            }}
-          />
-          {result && score ? (
-            <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
-              <Button
-                size="sm"
-                variant={playing ? "outline" : "primary"}
-                onClick={() => setPlaying((p) => !p)}
-                disabled={shown >= maxSeconds && !playing}
-              >
-                {playing ? "Pause" : "Play"}
-              </Button>
-              <input
-                type="range"
-                min={0}
-                max={maxSeconds}
-                step={1}
-                value={shown}
-                onChange={(e) => {
-                  setPlaying(false);
-                  pos.current = Number(e.target.value);
-                  setManual(pos.current);
-                }}
-                className="min-w-40 flex-1 accent-[#B8FF65]"
-                aria-label="Replay position"
-              />
-              <span className="num w-12 text-[13px]">{Math.min(90, Math.floor(shown / 60))}&apos;</span>
-              <select
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-                className="h-8 rounded border border-line bg-raised px-2 text-[12px]"
-                aria-label="Replay speed"
-              >
-                {[1, 4, 16].map((x) => (
-                  <option key={x} value={x}>
-                    {x}× broadcast
-                  </option>
-                ))}
-              </select>
-              {manual !== null && isLive ? (
-                <Button size="sm" variant="ghost" onClick={() => setManual(null)}>
-                  Back to live
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="border-t border-line">
-            <Commentary cfg={cfg} events={events} />
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Verification" right={<Badge tone="muted">computed in your browser</Badge>} />
-          <ul className="divide-y divide-line">
-            {checks?.map((c) => (
-              <Check key={c.label} {...c} />
-            ))}
-          </ul>
-          <p className="border-t border-line px-4 py-3 text-[12px] text-muted">
-            The match engine runs off-chain. These checks prove the result follows from a seed fixed before betting and
-            a block hash that did not exist until betting closed; the contract itself does not re-run the engine. See
-            the <ExtLink href="https://github.com/carynyx80/oddra/blob/main/docs/FAIRNESS.md">fairness model</ExtLink>.{" "}
-            {explorer ? <ExtLink href={addressUrl(deployment.registry)}>Registry on the explorer</ExtLink> : null}
-          </p>
-        </Card>
+      <Scoreboard
+        id={v.id}
+        cfg={cfg}
+        slot={s!}
+        now={now}
+        phase={phase!}
+        score={score}
+        gameSeconds={shown}
+        revealed={revealed}
+        status={v.status}
+      />
+      {error ? <p className="text-[13px] text-neg">{error}</p> : null}
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">
-          <StatsPanel cfg={cfg} stats={stats} />
-          <Timeline cfg={cfg} events={events} />
+          <Card className="overflow-hidden">
+            <div className="relative bg-[#070d09]">
+              <Pitch
+                config={cfg}
+                result={score ? result : null}
+                preview={previewFrame(cfg)}
+                gameSeconds={() => {
+                  if (manual !== null) return pos.current;
+                  const n = chainNowSync();
+                  if (phase === "finished") return 5400;
+                  return s && n !== null
+                    ? Math.max(0, Math.min(5400, (n - s.kickoff) * GAME_SECONDS_PER_REAL_SECOND))
+                    : 0;
+                }}
+              />
+              {score ? <EventToast cfg={cfg} events={events} gameSeconds={shown} /> : null}
+            </div>
+            {result && score ? (
+              <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3">
+                <Button
+                  size="sm"
+                  variant={playing ? "outline" : "primary"}
+                  onClick={() => setPlaying((p) => !p)}
+                  disabled={shown >= maxSeconds && !playing}
+                >
+                  {playing ? "Pause" : shown >= maxSeconds ? "Ended" : "Play"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setPlaying(false);
+                    pos.current = 0;
+                    setManual(0);
+                  }}
+                >
+                  Restart
+                </Button>
+                <input
+                  type="range"
+                  min={0}
+                  max={maxSeconds}
+                  step={1}
+                  value={shown}
+                  onChange={(e) => {
+                    setPlaying(false);
+                    pos.current = Number(e.target.value);
+                    setManual(pos.current);
+                  }}
+                  className="min-w-40 flex-1 accent-[#B8FF65]"
+                  aria-label="Replay position"
+                />
+                <span className="num w-10 text-[13px]">{Math.min(90, Math.floor(shown / 60))}&apos;</span>
+                <select
+                  value={speed}
+                  onChange={(e) => setSpeed(Number(e.target.value))}
+                  className="h-8 rounded border border-line bg-raised px-2 text-[12px]"
+                  aria-label="Replay speed"
+                >
+                  {[1, 4, 16].map((x) => (
+                    <option key={x} value={x}>
+                      {x}× broadcast
+                    </option>
+                  ))}
+                </select>
+                {manual !== null && isLive ? (
+                  <Button size="sm" variant="ghost" onClick={() => setManual(null)}>
+                    Back to live
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {score ? (
+              <div className="border-t border-line">
+                <PossessionBar cfg={cfg} stats={stats} />
+                <div className="border-t border-line">
+                  <Momentum cfg={cfg} result={result} gameSeconds={shown} />
+                </div>
+              </div>
+            ) : null}
+          </Card>
+          <Card className="overflow-hidden">
+            <MatchTabs cfg={cfg} events={events} stats={stats} result={score ? result : null} />
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader title="Verification" right={<Badge tone="muted">computed in your browser</Badge>} />
+            <ul className="divide-y divide-line">
+              {checks?.map((c) => (
+                <Check key={c.label} {...c} />
+              ))}
+            </ul>
+            <p className="border-t border-line px-4 py-3 text-[12px] text-muted">
+              The match engine runs off-chain. These checks prove the result follows from a seed fixed before betting
+              and a block hash that did not exist until betting closed; the contract itself does not re-run the engine.
+              See the{" "}
+              <ExtLink href="https://github.com/carynyx80/oddra/blob/main/docs/FAIRNESS.md">fairness model</ExtLink>.{" "}
+              {explorer ? <ExtLink href={addressUrl(deployment.registry)}>Registry on the explorer</ExtLink> : null}
+            </p>
+          </Card>
+          <Card className="overflow-hidden">
+            <Markets
+              matchId={v.id}
+              odds={v.odds}
+              open={false}
+              winMask={v.book.settled ? v.book.winMask : null}
+              homeShort={cfg.home.short}
+              awayShort={cfg.away.short}
+            />
+          </Card>
         </div>
       </div>
-      <Markets
-        matchId={v.id}
-        odds={v.odds}
-        open={false}
-        winMask={v.book.settled ? v.book.winMask : null}
-        homeShort={cfg.home.short}
-        awayShort={cfg.away.short}
-      />
     </div>
   );
 }

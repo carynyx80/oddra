@@ -4,20 +4,20 @@ import { useMemo } from "react";
 import { GAME_SECONDS_PER_REAL_SECOND } from "@oddra/engine";
 import { formatClock, phaseOf, slot } from "@oddra/shared";
 import { Pitch } from "@/components/Pitch";
-import { BetSlip } from "@/components/live/BetSlip";
-import { Markets } from "@/components/live/Markets";
-import { Commentary, MatchHeader, RecentResults, StatsPanel, Timeline } from "@/components/live/Panels";
-import { Badge, Card, CardHeader, Empty } from "@/components/ui/primitives";
+import { BettingRail, NextUp, ProofCard } from "@/components/live/BettingRail";
+import { EventToast, MatchTabs, Momentum, PossessionBar, ResultsStrip } from "@/components/live/MatchCentre";
+import { Scoreboard } from "@/components/live/Scoreboard";
+import { Badge, Card, Empty } from "@/components/ui/primitives";
 import { deployed } from "@/lib/config";
 import { chainNowSync, useLiveFeed, useRecentMatches, useSchedule, useSimulation, useVisibleEvents } from "@/lib/hooks";
-import { configFor, minuteOf, previewFrame, statsAt } from "@/lib/match";
+import { configFor, previewFrame, statsAt } from "@/lib/match";
 import { useSlip } from "@/lib/slip";
 import { useEffect } from "react";
 
 export default function LivePage() {
   const { now, curId, current, next } = useSchedule();
   const feed = useLiveFeed(curId);
-  const recent = useRecentMatches(curId, 6);
+  const recent = useRecentMatches(curId, 8);
 
   // feature the current slot's match, or the next one while the current slot is empty
   const featured =
@@ -50,7 +50,6 @@ export default function LivePage() {
   const last = events[events.length - 1];
   const score: [number, number] | null =
     phase === "live" || phase === "finished" ? (last ? [last.home, last.away] : [0, 0]) : null;
-  const recentGoal = last?.type === "goal" && gameSeconds - last.tick * 0.1 < 24 ? last : null;
   const betting = phase === "betting" && featured?.status === "Scheduled";
   // a pick only lives while its market is open
   const clearPick = useSlip((x) => x.setPick);
@@ -58,32 +57,18 @@ export default function LivePage() {
     if (!betting) clearPick(null);
   }, [betting, clearPick]);
 
-  let phaseLabel = "";
   let clock: string | null = null;
   let note: string | null = null;
   if (s && now !== null && featured) {
-    if (phase === "upcoming") {
-      phaseLabel = "Betting opens in";
-      clock = formatClock(s.openTime - now);
-    } else if (phase === "betting") {
-      phaseLabel = "Betting closes in";
-      clock = formatClock(s.kickoff - now);
-    } else if (phase === "live") {
-      phaseLabel = "Live";
+    if (phase === "upcoming") clock = formatClock(s.openTime - now);
+    else if (phase === "betting") clock = formatClock(s.kickoff - now);
+    else if (phase === "live") {
       clock = formatClock(s.fullTime - now);
       if (!revealed)
         note =
           featured.status === "Voided"
             ? "This match was voided: every stake is refundable."
             : "Betting closed. Waiting for the entropy block and the seed reveal…";
-    } else {
-      phaseLabel =
-        featured.status === "Settled"
-          ? "Full time · settled"
-          : featured.status === "Voided"
-            ? "Voided · stakes refundable"
-            : "Full time · settling";
-      clock = null;
     }
   }
 
@@ -100,6 +85,15 @@ export default function LivePage() {
       </Card>
     );
 
+  const nextCfg =
+    featured && next.data && next.data.id !== featured.id && next.data.status !== "None"
+      ? {
+          cfg: configFor(next.data.id, next.data.m.homeTeam, next.data.m.awayTeam)!,
+          openTime: slot(next.data.id).openTime,
+        }
+      : null;
+  const prematch = phase === "betting" || phase === "upcoming";
+
   return (
     <div className="space-y-4">
       {safeState ? (
@@ -107,29 +101,30 @@ export default function LivePage() {
           {safeState}
         </div>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          {featured && cfg ? (
-            <MatchHeader
-              id={featured.id}
-              cfg={cfg}
-              phaseLabel={phaseLabel}
-              clock={clock}
-              score={score}
-              minute={phase === "live" ? Math.min(90, Math.floor(gameSeconds / 60) + 1) : null}
-              live={phase === "live" && revealed}
-              note={note}
-            />
-          ) : (
-            <Card>
-              <Empty>{now === null ? "Syncing with the chain…" : "Waiting for the next match to be committed…"}</Empty>
-            </Card>
-          )}
-        </div>
 
-        <div className="space-y-4">
-          <Card className="overflow-hidden">
-            <div className="relative">
+      {featured && cfg && s && now !== null && phase ? (
+        <Scoreboard
+          id={featured.id}
+          cfg={cfg}
+          slot={s}
+          now={now}
+          phase={phase}
+          score={score}
+          gameSeconds={gameSeconds}
+          revealed={revealed}
+          status={featured.status}
+          next={nextCfg}
+        />
+      ) : (
+        <Card>
+          <Empty>{now === null ? "Syncing with the chain…" : "Waiting for the next match to be committed…"}</Empty>
+        </Card>
+      )}
+
+      {featured && cfg ? (
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <Card className="overflow-hidden xl:col-start-1">
+            <div className="relative bg-[#070d09]">
               <Pitch
                 config={cfg}
                 result={phase === "live" || phase === "finished" ? result : null}
@@ -141,94 +136,81 @@ export default function LivePage() {
                     : 0;
                 }}
               />
-              {cfg && score ? (
-                <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md bg-black/70 px-2.5 py-1.5 text-[13px] backdrop-blur">
-                  <span>{cfg.home.short}</span>
-                  <span className="num font-semibold">
-                    {score[0]}–{score[1]}
-                  </span>
-                  <span>{cfg.away.short}</span>
-                  {phase === "live" ? (
-                    <span className="num ml-1 text-accent">{minuteOf(gameSeconds * 10)}&apos;</span>
-                  ) : (
-                    <span className="ml-1 text-muted">FT</span>
-                  )}
-                </div>
+              {phase === "live" || phase === "finished" ? (
+                <EventToast cfg={cfg} events={events} gameSeconds={gameSeconds} />
               ) : null}
-              {phase === "betting" || phase === "upcoming" ? (
-                <div className="pointer-events-none absolute inset-x-0 bottom-3 text-center">
-                  <span className="rounded-md bg-black/70 px-3 py-1.5 text-[12px] text-muted backdrop-blur">
-                    Line-ups · {phase === "upcoming" ? "betting opens" : "kickoff"} in {clock ?? "–"}
-                  </span>
-                </div>
-              ) : null}
-              {recentGoal && cfg ? (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="rounded-md border border-accent/50 bg-black/80 px-6 py-3 text-center backdrop-blur">
-                    <div className="font-[family-name:var(--font-display)] text-[28px] font-bold tracking-[0.2em] text-accent">
-                      GOAL
+              {prematch && clock ? (
+                <div className="pointer-events-none absolute inset-0 flex items-end justify-center pb-5 sm:items-center sm:pb-0">
+                  <div className="rounded-xl border border-line bg-black/75 px-5 py-3 text-center backdrop-blur-md">
+                    <div className="label">{phase === "upcoming" ? "Betting opens in" : "Kickoff in"}</div>
+                    <div className="num mt-1 font-[family-name:var(--font-display)] text-[30px] font-bold leading-none sm:text-[38px]">
+                      {phase === "upcoming" ? clock : formatClock(s!.kickoff - (now ?? 0))}
                     </div>
-                    <div className="text-[13px]">{recentGoal.team === 0 ? cfg.home.name : cfg.away.name}</div>
+                    <div className="mt-1.5 text-[11px] text-muted">Line-ups shown in kickoff positions</div>
+                  </div>
+                </div>
+              ) : null}
+              {phase === "live" && !revealed ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-xl border border-line bg-black/80 px-5 py-3 text-center text-[13px] text-muted backdrop-blur-md">
+                    {note}
                   </div>
                 </div>
               ) : null}
             </div>
-            {cfg ? (
+            {phase === "live" || phase === "finished" ? (
               <div className="border-t border-line">
-                <CardHeader
-                  title="Commentary"
-                  right={feed.connected ? <Badge tone="accent">Live feed</Badge> : <Badge>Local replay</Badge>}
-                  className="border-b-0"
-                />
-                <Commentary cfg={cfg} events={events} />
+                <PossessionBar cfg={cfg} stats={stats} />
+                <div className="border-t border-line">
+                  <Momentum cfg={cfg} result={result} gameSeconds={gameSeconds} />
+                </div>
               </div>
             ) : null}
           </Card>
-        </div>
 
-        <div className="space-y-4 lg:col-span-2 xl:col-span-1">
-          {featured && cfg ? (
-            <>
-              {!betting && phase !== "upcoming" ? (
-                <div className="rounded-md border border-line bg-card px-4 py-3 text-[13px] text-muted">
-                  Markets are locked. Betting reopens for the next match when this one ends.
-                </div>
-              ) : null}
-              {betting ? (
-                <BetSlip open={betting} currentOdds={featured.odds} homeName={cfg.home.name} awayName={cfg.away.name} />
-              ) : null}
-              <Markets
-                matchId={featured.id}
-                odds={featured.odds}
-                open={betting}
-                winMask={featured.book.settled ? featured.book.winMask : null}
-                homeShort={cfg.home.short}
-                awayShort={cfg.away.short}
-              />
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {cfg ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <StatsPanel cfg={cfg} stats={stats} />
-          <div className="space-y-4">
-            <Timeline cfg={cfg} events={events} />
-            <RecentResults
-              rows={(recent.data ?? []).map((r) => ({
-                id: r.id,
-                home: r.m.homeTeam,
-                away: r.m.awayTeam,
-                homeGoals: r.m.homeGoals,
-                awayGoals: r.m.awayGoals,
-                status: ["None", "Scheduled", "Locked", "Revealed", "Settled", "Voided"][r.m.status],
-                cfg: configFor(r.id, r.m.homeTeam, r.m.awayTeam),
-              }))}
+          <div className="space-y-3 self-start xl:sticky xl:top-[72px] xl:col-start-2 xl:row-span-2 xl:row-start-1">
+            <BettingRail
+              match={featured}
+              cfg={cfg}
+              betting={betting}
+              closesIn={betting && s && now !== null ? s.kickoff - now : null}
+              phaseNote={
+                phase === "upcoming"
+                  ? "Opens soon"
+                  : phase === "finished"
+                    ? featured.book.settled
+                      ? "Settled"
+                      : "Settling"
+                    : "Locked"
+              }
             />
+            {!betting && nextCfg && now !== null ? (
+              <NextUp cfg={nextCfg.cfg} openTime={nextCfg.openTime} now={now} />
+            ) : null}
+            <ProofCard match={featured} />
           </div>
+
+          <Card className="overflow-hidden xl:col-start-1">
+            <MatchTabs
+              cfg={cfg}
+              events={events}
+              stats={stats}
+              result={phase === "live" || phase === "finished" ? result : null}
+              liveBadge={feed.connected ? <Badge tone="accent">Live feed</Badge> : <Badge>Local replay</Badge>}
+            />
+          </Card>
         </div>
       ) : null}
+
+      <ResultsStrip
+        rows={(recent.data ?? []).map((r) => ({
+          id: r.id,
+          cfg: configFor(r.id, r.m.homeTeam, r.m.awayTeam),
+          homeGoals: r.m.homeGoals,
+          awayGoals: r.m.awayGoals,
+          status: ["None", "Scheduled", "Locked", "Revealed", "Settled", "Voided"][r.m.status],
+        }))}
+      />
     </div>
   );
 }

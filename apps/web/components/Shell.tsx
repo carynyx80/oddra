@@ -6,6 +6,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "./Logo";
 import { AgeGate } from "./AgeGate";
+import { LiveTicker } from "./LiveTicker";
 import { chain, deployed } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +50,7 @@ export function Shell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <LiveTicker />
             <Link href="/profile" className="hidden text-[13px] text-muted hover:text-fg sm:block">
               Profile
             </Link>
