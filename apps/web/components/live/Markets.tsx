@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { MARKETS, SELECTIONS, formatOdds, selectionWins, type MarketKey } from "@oddra/shared";
 import { Badge, Tabs } from "@/components/ui/primitives";
+import type { BestPrices } from "@/lib/exchange";
 import { useSlip } from "@/lib/slip";
-import { cn } from "@/lib/utils";
+import { cn, fmtAsset } from "@/lib/utils";
 
 const COLS: Record<MarketKey, string> = {
   result: "grid-cols-3",
@@ -13,6 +14,16 @@ const COLS: Record<MarketKey, string> = {
   btts: "grid-cols-2",
   firstScorer: "grid-cols-3",
   correctScore: "grid-cols-4",
+};
+
+/** Exchange cells hold two prices each, so they get more room. */
+const XCOLS: Record<MarketKey, string> = {
+  result: "grid-cols-3",
+  doubleChance: "grid-cols-3",
+  totals: "grid-cols-2",
+  btts: "grid-cols-2",
+  firstScorer: "grid-cols-3",
+  correctScore: "grid-cols-2 sm:grid-cols-3",
 };
 
 type Group = "main" | "goals" | "score";
@@ -56,6 +67,7 @@ export function Markets({
   winMask,
   homeShort,
   awayShort,
+  prices,
 }: {
   matchId: bigint;
   odds: number[];
@@ -63,12 +75,14 @@ export function Markets({
   winMask?: number | null;
   homeShort: string;
   awayShort: string;
+  /** exchange mode: best back/lay offers per selection; `odds` are then the reference (guide) prices */
+  prices?: BestPrices[];
 }) {
-  const { pick, setPick } = useSlip();
+  const { pick, setPick, asset, setAsset } = useSlip();
   const [group, setGroup] = useState<Group>("main");
   const moves = usePriceMoves(odds);
   const label = (id: number, l: string) => (id === 0 || id === 10 ? homeShort : id === 2 || id === 11 ? awayShort : l);
-  const published = odds.some((o) => o > 0);
+  const published = !!prices || odds.some((o) => o > 0);
   return (
     <div>
       <div className="flex items-center justify-between pr-3">
@@ -81,7 +95,28 @@ export function Markets({
             { key: "score", label: "Correct score" },
           ]}
         />
-        {open ? <Badge tone="accent">Open</Badge> : <Badge>{winMask != null ? "Settled" : "Locked"}</Badge>}
+        <div className="flex items-center gap-2">
+          {prices ? (
+            <div
+              className="flex rounded border border-line text-[11px]"
+              role="radiogroup"
+              aria-label="Order book asset"
+            >
+              {(["USDG", "ETH"] as const).map((a) => (
+                <button
+                  key={a}
+                  role="radio"
+                  aria-checked={asset === a}
+                  onClick={() => setAsset(a)}
+                  className={cn("px-2 py-0.5", asset === a ? "bg-raised text-fg" : "text-muted hover:text-fg")}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {open ? <Badge tone="accent">Open</Badge> : <Badge>{winMask != null ? "Settled" : "Locked"}</Badge>}
+        </div>
       </div>
       {!published ? (
         <p className="p-4 text-[13px] text-muted">
@@ -92,8 +127,28 @@ export function Markets({
           {MARKETS.filter((m) => GROUPS[group].includes(m.key)).map((m) => (
             <div key={m.key} className="px-4 py-3">
               <div className="label mb-2">{m.title}</div>
-              <div className={cn("grid gap-1.5", COLS[m.key])}>
+              <div className={cn("grid gap-1.5", prices ? XCOLS[m.key] : COLS[m.key])}>
                 {SELECTIONS.filter((s) => s.market === m.key).map((s) => {
+                  if (prices)
+                    return (
+                      <ExchangeCell
+                        key={s.id}
+                        label={label(s.id, s.label)}
+                        guide={odds[s.id]}
+                        best={prices[s.id]}
+                        asset={asset}
+                        open={open}
+                        won={winMask != null ? selectionWins(winMask, s.id) : null}
+                        selected={pick?.matchId === matchId && pick.selection === s.id ? (pick.side ?? "back") : null}
+                        onPick={(side, o) =>
+                          setPick(
+                            pick?.matchId === matchId && pick.selection === s.id && pick.side === side
+                              ? null
+                              : { matchId, selection: s.id, odds: o, side },
+                          )
+                        }
+                      />
+                    );
                   const o = odds[s.id];
                   const selected = pick?.matchId === matchId && pick.selection === s.id;
                   const won = winMask != null && selectionWins(winMask, s.id);
@@ -143,6 +198,77 @@ export function Markets({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * One selection on the exchange: Back takes the best lay offer, Lay takes the best back offer. With nothing on
+ * offer the guide price is shown, and picking it posts a new offer for someone else to take.
+ */
+function ExchangeCell({
+  label,
+  guide,
+  best,
+  asset,
+  open,
+  won,
+  selected,
+  onPick,
+}: {
+  label: string;
+  guide: number;
+  best?: BestPrices;
+  asset: "USDG" | "ETH";
+  open: boolean;
+  won: boolean | null;
+  selected: "back" | "lay" | null;
+  onPick: (side: "back" | "lay", odds: number) => void;
+}) {
+  const cell = (side: "back" | "lay") => {
+    const b = side === "back" ? best?.back : best?.lay;
+    const o = b?.odds ?? (guide || 0);
+    const on = selected === side;
+    return (
+      <button
+        disabled={!open || !o}
+        onClick={() => onPick(side, o)}
+        aria-pressed={on}
+        title={
+          b
+            ? `${fmtAsset(b.available, asset)} available`
+            : o
+              ? "Nothing on offer: post your own at the guide price"
+              : ""
+        }
+        className={cn(
+          "flex min-h-11 flex-col items-center justify-center rounded px-1 py-1 transition-colors",
+          side === "back" ? "bg-back/[0.12] text-back" : "bg-lay/[0.12] text-lay",
+          on && (side === "back" ? "bg-back/30 ring-1 ring-back" : "bg-lay/30 ring-1 ring-lay"),
+          open && o && !on && (side === "back" ? "hover:bg-back/20" : "hover:bg-lay/20"),
+          !b && "opacity-60",
+        )}
+      >
+        <span className="num text-[14px] font-semibold leading-tight">{o ? formatOdds(o) : "–"}</span>
+        <span className="num text-[9px] leading-tight opacity-80">
+          {b ? fmtAsset(b.available, asset, false) : side === "back" ? "back" : "lay"}
+        </span>
+      </button>
+    );
+  };
+  return (
+    <div
+      className={cn(
+        "rounded-md border bg-raised p-1",
+        won === true ? "border-pos/60 bg-pos/10" : "border-line",
+        won === false && "opacity-45",
+      )}
+    >
+      <div className={cn("truncate px-1 pb-1 text-center text-[11px]", won ? "text-pos" : "text-muted")}>{label}</div>
+      <div className="grid grid-cols-2 gap-1">
+        {cell("back")}
+        {cell("lay")}
+      </div>
     </div>
   );
 }

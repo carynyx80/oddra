@@ -8,7 +8,8 @@ import { useAccount, usePublicClient, useWriteContract } from "wagmi";
 import { MARKETS, SELECTIONS, formatOdds, oddraBookAbi } from "@oddra/shared";
 import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat, Tabs } from "@/components/ui/primitives";
-import { deployment, txUrl } from "@/lib/config";
+import { ExchangeBets } from "@/components/ExchangeBets";
+import { deployment, exchangeMode, txUrl } from "@/lib/config";
 import { useMyBets, type BetRow } from "@/lib/hooks";
 import { fmtAsset } from "@/lib/utils";
 
@@ -16,6 +17,10 @@ type Tab = "open" | "won" | "lost" | "claimable" | "history";
 const TONE = { Open: "muted", Won: "pos", Lost: "neg", Refund: "warn", Paid: "accent" } as const;
 
 export default function BetsPage() {
+  return exchangeMode ? <ExchangeBets /> : <HouseBets />;
+}
+
+function HouseBets() {
   const { address, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
   const bets = useMyBets(address);

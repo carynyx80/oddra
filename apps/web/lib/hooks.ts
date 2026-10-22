@@ -10,6 +10,7 @@ import {
   MATCH_STATUS,
   isEth,
   oddraBookAbi,
+  oddraExchangeAbi,
   oddraMatchRegistryAbi,
   oddraRiskManagerAbi,
   oddraTestUSDGAbi,
@@ -17,9 +18,11 @@ import {
   phaseOf,
   slot,
   slotAt,
+  winMask as computeWinMask,
+  ST,
   type AssetKey,
 } from "@oddra/shared";
-import { deployed, deployment, liveUrl } from "./config";
+import { deployed, deployment, exchangeMode, liveUrl } from "./config";
 
 export const STATUS = MATCH_STATUS;
 export type StatusName = (typeof STATUS)[number];
@@ -124,6 +127,35 @@ export function useMatch(id: bigint | null | undefined, refetchMs = 4_000) {
     enabled: deployed && id != null && !!client,
     refetchInterval: refetchMs,
     queryFn: async (): Promise<MatchView> => {
+      if (exchangeMode) {
+        const [m, ref] = await Promise.all([
+          client!.readContract({
+            address: deployment.registry,
+            abi: oddraMatchRegistryAbi,
+            functionName: "getMatch",
+            args: [id!],
+          }),
+          client!.readContract({
+            address: deployment.exchange!,
+            abi: oddraExchangeAbi,
+            functionName: "referenceOdds",
+            args: [id!],
+          }),
+        ]);
+        const mm = m as unknown as OnchainMatch;
+        const settled = mm.status === ST.Settled;
+        const voided = mm.status === ST.Voided;
+        const mask = settled ? computeWinMask(mm.homeGoals, mm.awayGoals, mm.firstScorer) : 0;
+        const empty: AssetBook = { settled, voided, winMask: mask, totalStakes: 0n, reserved: 0n, owed: 0n };
+        return {
+          id: id!,
+          m: mm,
+          status: STATUS[mm.status],
+          odds: [...(ref as readonly number[])],
+          oddsVersion: 1,
+          book: { settled, voided, winMask: mask, usdg: empty, eth: empty },
+        };
+      }
       const [m, [odds, oddsVersion], bu, be] = await Promise.all([
         client!.readContract({
           address: deployment.registry,
@@ -297,7 +329,7 @@ export function useUsdg(owner?: Address) {
           address: deployment.usdg,
           abi: oddraTestUSDGAbi,
           functionName: "allowance",
-          args: [owner!, deployment.book],
+          args: [owner!, exchangeMode ? deployment.exchange! : deployment.book],
         }) as Promise<bigint>,
         deployment.testToken
           ? (client!.readContract({
@@ -338,7 +370,7 @@ export function useMyBets(owner?: Address) {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["bets", owner],
-    enabled: deployed && !!owner && !!client,
+    enabled: deployed && !exchangeMode && !!owner && !!client,
     refetchInterval: 8_000,
     queryFn: async (): Promise<BetRow[]> => {
       const ids = (await client!.readContract({
@@ -430,7 +462,7 @@ export function useTreasury() {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["treasury"],
-    enabled: deployed && !!client,
+    enabled: deployed && !exchangeMode && !!client,
     refetchInterval: 10_000,
     queryFn: async (): Promise<Record<AssetKey, TreasuryTotals>> => {
       const read = async (asset: Address) => {
@@ -464,7 +496,7 @@ export function useLimits() {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["limits"],
-    enabled: deployed && !!client,
+    enabled: deployed && !exchangeMode && !!client,
     staleTime: 60_000,
     queryFn: async (): Promise<Record<AssetKey, StakeLimits>> => {
       const read = async (asset: Address) => {

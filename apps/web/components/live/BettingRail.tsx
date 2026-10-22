@@ -6,9 +6,12 @@ import { useAccount } from "wagmi";
 import type { MatchConfig } from "@oddra/engine";
 import { SELECTIONS, ST, formatClock, formatOdds, hasResult, isRevealed } from "@oddra/shared";
 import { BetSlip } from "@/components/live/BetSlip";
+import { ExchangeTicket } from "@/components/live/ExchangeTicket";
 import { Markets } from "@/components/live/Markets";
 import { Crest } from "@/components/live/Scoreboard";
 import { Badge, Card } from "@/components/ui/primitives";
+import { exchangeMode } from "@/lib/config";
+import { bestPrices, useMyExchange, useOrderBook } from "@/lib/exchange";
 import { useMyBets, type MatchView } from "@/lib/hooks";
 import { useSlip } from "@/lib/slip";
 import { fmtAsset } from "@/lib/utils";
@@ -29,9 +32,34 @@ export function BettingRail({
   phaseNote: string;
 }) {
   const pick = useSlip((s) => s.pick);
+  const asset = useSlip((s) => s.asset);
   const { address } = useAccount();
   const bets = useMyBets(address);
-  const mine = (bets.data ?? []).filter((b) => b.matchId === match.id);
+  const xbets = useMyExchange(address);
+  const orderBook = useOrderBook(exchangeMode ? match.id : null);
+  const prices = exchangeMode ? bestPrices(orderBook.data ?? [], asset, SELECTIONS.length) : undefined;
+  const mine = exchangeMode
+    ? (xbets.data?.positions ?? [])
+        .filter((p) => p.matchId === match.id)
+        .map((p) => ({
+          id: p.id,
+          selection: p.selection,
+          text: `${p.side === "back" ? "Back" : "Lay"} ${fmtAsset(p.stake, p.asset)} @ ${formatOdds(p.odds)}`,
+          status: (p.status === "Void"
+            ? "Refund"
+            : p.paid && p.status === "Won"
+              ? "Paid"
+              : p.status) as keyof typeof TONE,
+        }))
+    : (bets.data ?? [])
+        .filter((b) => b.matchId === match.id)
+        .map((b) => ({
+          id: b.id,
+          selection: b.selection,
+          text: `${fmtAsset(b.stake, b.asset)} @ ${formatOdds(b.odds)}`,
+          status: (b.status === "Paid" && !b.won ? "Refund" : b.status) as keyof typeof TONE,
+        }));
+  const myOffers = (xbets.data?.offers ?? []).filter((o) => o.matchId === match.id && !o.closed && o.remaining > 0n);
   const urgent = closesIn !== null && closesIn < 30;
   return (
     <div className="space-y-3">
@@ -40,7 +68,8 @@ export function BettingRail({
           <div>
             <div className="text-[13px] font-medium">{betting ? "Place a bet" : "Betting closed"}</div>
             <div className="text-[11px] text-muted">
-              {cfg.home.short} v {cfg.away.short} · single bets in USDG or ETH
+              {cfg.home.short} v {cfg.away.short} ·{" "}
+              {exchangeMode ? "back or lay against other players, USDG or ETH" : "single bets in USDG or ETH"}
             </div>
           </div>
           {betting && closesIn !== null ? (
@@ -63,14 +92,25 @@ export function BettingRail({
               className="overflow-hidden border-b border-line"
             >
               <div className="[&>div]:rounded-none [&>div]:border-0">
-                <BetSlip open={betting} currentOdds={match.odds} homeName={cfg.home.name} awayName={cfg.away.name} />
+                {exchangeMode ? (
+                  <ExchangeTicket
+                    open={betting}
+                    referenceOdds={match.odds}
+                    homeName={cfg.home.name}
+                    awayName={cfg.away.name}
+                  />
+                ) : (
+                  <BetSlip open={betting} currentOdds={match.odds} homeName={cfg.home.name} awayName={cfg.away.name} />
+                )}
               </div>
             </motion.div>
           ) : null}
         </AnimatePresence>
         {betting && !pick ? (
           <div className="border-b border-line bg-accent/[0.04] px-4 py-2.5 text-[12px] text-muted">
-            Tap a price to build your bet slip.
+            {exchangeMode
+              ? "Back to bet for an outcome, Lay to bet against it. Grey prices are a guide: nobody has offered them yet."
+              : "Tap a price to build your bet slip."}
           </div>
         ) : null}
         {!betting ? (
@@ -85,9 +125,10 @@ export function BettingRail({
           winMask={match.book.settled ? match.book.winMask : null}
           homeShort={cfg.home.short}
           awayShort={cfg.away.short}
+          prices={prices}
         />
       </Card>
-      {mine.length > 0 ? (
+      {mine.length > 0 || myOffers.length > 0 ? (
         <Card>
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <span className="text-[13px] font-medium">Your bets on this match</span>
@@ -98,17 +139,18 @@ export function BettingRail({
           <ul className="divide-y divide-line">
             {mine.map((b) => (
               <li key={b.id.toString()} className="flex items-center gap-3 px-4 py-2 text-[12px]">
-                <span className="flex-1 truncate">
-                  {SELECTIONS[b.selection].label === "Home"
-                    ? cfg.home.short
-                    : SELECTIONS[b.selection].label === "Away"
-                      ? cfg.away.short
-                      : SELECTIONS[b.selection].label}
-                </span>
+                <span className="flex-1 truncate">{selName(b.selection, cfg)}</span>
+                <span className="num text-muted">{b.text}</span>
+                <Badge tone={TONE[b.status]}>{b.status === "Refund" ? "Refunded" : b.status}</Badge>
+              </li>
+            ))}
+            {myOffers.map((o) => (
+              <li key={`o${o.id}`} className="flex items-center gap-3 px-4 py-2 text-[12px]">
+                <span className="flex-1 truncate">{selName(o.selection, cfg)}</span>
                 <span className="num text-muted">
-                  {fmtAsset(b.stake, b.asset)} @ {formatOdds(b.odds)}
+                  {o.side === "back" ? "Back" : "Lay"} {fmtAsset(o.remaining, o.asset)} @ {formatOdds(o.odds)}
                 </span>
-                <Badge tone={TONE[b.status]}>{b.status === "Paid" ? (b.won ? "Paid" : "Refunded") : b.status}</Badge>
+                <Badge tone="warn">Unmatched</Badge>
               </li>
             ))}
           </ul>
@@ -117,6 +159,13 @@ export function BettingRail({
     </div>
   );
 }
+
+const selName = (id: number, cfg: MatchConfig) =>
+  SELECTIONS[id].label === "Home"
+    ? cfg.home.short
+    : SELECTIONS[id].label === "Away"
+      ? cfg.away.short
+      : SELECTIONS[id].label;
 
 export function NextUp({ cfg, openTime, now }: { cfg: MatchConfig; openTime: number; now: number }) {
   return (

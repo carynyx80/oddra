@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import { chainById, type Deployment } from "@oddra/shared";
+import { chainById, isExchange, type Deployment } from "@oddra/shared";
 import mainnetDeployment from "../../../contracts/deployments/4663.json";
 import testnet from "../../../contracts/deployments/46630.json";
 
@@ -21,6 +21,8 @@ export const deployment: Deployment = {
   risk: addr(process.env.NEXT_PUBLIC_RISK_ADDRESS, base.risk),
   book: addr(process.env.NEXT_PUBLIC_BOOK_ADDRESS, base.book),
   feeCollector: addr(process.env.NEXT_PUBLIC_FEE_COLLECTOR_ADDRESS, base.feeCollector),
+  exchange: addr(process.env.NEXT_PUBLIC_EXCHANGE_ADDRESS, base.exchange),
+  mode: (process.env.NEXT_PUBLIC_MODE as Deployment["mode"]) || base.mode,
 };
 
 export const chain = chainById(chainId);
@@ -30,7 +32,9 @@ export const usdgSymbol = deployment.testToken ? "tUSDG" : "USDG";
 export const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || chain.rpcUrls.default.http[0];
 export const liveUrl = process.env.NEXT_PUBLIC_LIVE_URL || "";
 export const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
-export const deployed = Boolean(deployment.book && deployment.registry);
+/** Peer-to-peer back/lay exchange (no house liquidity) rather than the treasury-backed book. */
+export const exchangeMode = isExchange(deployment);
+export const deployed = Boolean(deployment.registry && (exchangeMode ? deployment.exchange : deployment.book));
 
 /** $ODRA has not launched. Set NEXT_PUBLIC_ODRA_TOKEN_ADDRESS only to the verified address once it exists. */
 export const odraToken = (process.env.NEXT_PUBLIC_ODRA_TOKEN_ADDRESS || "") as Address | "";

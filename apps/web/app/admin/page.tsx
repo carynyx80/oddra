@@ -6,9 +6,15 @@ import { useAccount, usePublicClient, useReadContract, useSignMessage, useWriteC
 import { oddraBookAbi } from "@oddra/shared";
 import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat } from "@/components/ui/primitives";
-import { deployment, txUrl } from "@/lib/config";
+import { deployment, exchangeMode, txUrl } from "@/lib/config";
+import { useExchangeTotals } from "@/lib/exchange";
 import { useTreasury } from "@/lib/hooks";
 import { fmtAsset, fmtUsdg, short } from "@/lib/utils";
+
+/** Pause/unpause the contract that takes bets (both expose the same Pausable functions). */
+const BETS = (exchangeMode ? { address: deployment.exchange! } : { address: deployment.book }) as {
+  address: `0x${string}`;
+};
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export default function AdminPage() {
@@ -25,8 +31,9 @@ export default function AdminPage() {
     refetchInterval: 10_000,
   });
   const treasury = useTreasury();
+  const totals = useExchangeTotals();
   const paused = useReadContract({
-    address: deployment.book,
+    ...BETS,
     abi: oddraBookAbi,
     functionName: "paused",
     query: { refetchInterval: 10_000 },
@@ -59,7 +66,7 @@ export default function AdminPage() {
     try {
       const fn = paused.data ? "unpause" : "pause";
       if (!confirm(`${fn === "pause" ? "Pause" : "Resume"} all new betting? Claims are never paused.`)) return;
-      const hash = await writeContractAsync({ address: deployment.book, abi: oddraBookAbi, functionName: fn });
+      const hash = await writeContractAsync({ ...BETS, abi: oddraBookAbi, functionName: fn });
       await client!.waitForTransactionReceipt({ hash });
       await paused.refetch();
       setMsg(`Betting ${fn === "pause" ? "paused" : "resumed"}.`);
@@ -126,15 +133,25 @@ export default function AdminPage() {
           value={w.chainTime ? new Date(w.chainTime * 1000).toLocaleTimeString() : "–"}
           sub={`indexed to ${s.cursor?.block ?? "–"}`}
         />
-        <Stat
-          label="Treasury free"
-          value={treasury.data ? `${fmtUsdg(treasury.data.USDG.freeBalance, 0)} USDG` : "–"}
-          sub={
-            treasury.data
-              ? `${fmtAsset(treasury.data.ETH.freeBalance, "ETH")} free · reserved ${fmtUsdg(treasury.data.USDG.totalReserved, 0)} USDG / ${fmtAsset(treasury.data.ETH.totalReserved, "ETH")}`
-              : ""
-          }
-        />
+        {exchangeMode ? (
+          <Stat
+            label="Held for players"
+            value={totals.data ? fmtAsset(totals.data.USDG.escrowed, "USDG") : "–"}
+            sub={
+              totals.data ? `${fmtAsset(totals.data.ETH.escrowed, "ETH")} · ${totals.data.positions} matched bets` : ""
+            }
+          />
+        ) : (
+          <Stat
+            label="Treasury free"
+            value={treasury.data ? `${fmtUsdg(treasury.data.USDG.freeBalance, 0)} USDG` : "–"}
+            sub={
+              treasury.data
+                ? `${fmtAsset(treasury.data.ETH.freeBalance, "ETH")} free · reserved ${fmtUsdg(treasury.data.USDG.totalReserved, 0)} USDG / ${fmtAsset(treasury.data.ETH.totalReserved, "ETH")}`
+                : ""
+            }
+          />
+        )}
         <Stat label="Settlement queue" value={String(s.pendingPayouts ?? 0)} sub="winning or refund bets unpaid" />
         <Stat label="Failed jobs" value={String((s.failedJobs ?? []).length)} sub="retried automatically" />
       </Card>

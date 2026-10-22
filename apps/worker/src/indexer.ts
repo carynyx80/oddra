@@ -8,6 +8,7 @@ import {
   ETH_ADDRESS,
   isEth,
   oddraExchangeAbi,
+  ST,
   selectionWins,
 } from "@oddra/shared";
 import type { Chain } from "./chain";
@@ -331,11 +332,23 @@ export class Indexer {
         break;
       }
       case "exchange.Paid": {
-        const fee = BigInt(a.fee);
-        const winner = fee === 0n ? null : Number(a.side) === 0 ? "BACK" : "LAY";
+        // a void pays both sides back; otherwise the paid side is the winner (a tiny win can round to zero fee)
+        const pos = await prisma.exchangePosition.findUnique({ where: { id: a.positionId } });
+        const st = pos
+          ? Number(
+              await this.chain.pub.readContract({
+                address: this.env.deployment.registry,
+                abi: oddraMatchRegistryAbi,
+                functionName: "status",
+                args: [pos.matchId],
+              }),
+            )
+          : 0;
+        const winner = st === ST.Voided ? "VOID" : Number(a.side) === 0 ? "BACK" : "LAY";
+        const paid = BigInt(a.amount) + (pos?.paidAmount && winner === "VOID" ? BigInt(pos.paidAmount.toFixed()) : 0n);
         await prisma.exchangePosition.updateMany({
           where: { id: a.positionId },
-          data: { winner: winner ?? undefined, paidAmount: a.amount.toString(), fee: a.fee.toString() },
+          data: { winner, paidAmount: paid.toString(), fee: a.fee.toString() },
         });
         break;
       }

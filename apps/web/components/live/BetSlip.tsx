@@ -39,6 +39,14 @@ const FRIENDLY: Record<string, string> = {
   FaucetCooldown: "The faucet can be used once per hour.",
   BadBond: "The dispute bond amount is wrong.",
   TooLate: "The dispute window has closed.",
+  OfferUnavailable: "Someone else took that offer first. Refresh the prices and try again.",
+  SelfMatch: "You cannot take your own offer.",
+  BadOdds: "Odds must be between 1.01 and 1000.",
+  BadAmount: "That amount is below the minimum for this asset.",
+  BadValue: "The ETH amount sent did not match. Refresh and try again.",
+  NothingToClaim: "Nothing to claim on this position yet.",
+  NotMaker: "Only the maker can cancel an offer before kickoff.",
+  UnsupportedAsset: "Betting in this asset is not enabled.",
 };
 
 export function explain(e: unknown): string {

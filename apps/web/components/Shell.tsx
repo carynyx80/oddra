@@ -7,14 +7,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Logo } from "./Logo";
 import { AgeGate } from "./AgeGate";
 import { LiveTicker } from "./LiveTicker";
-import { chain, deployed, isMainnet } from "@/lib/config";
+import { chain, deployed, exchangeMode, isMainnet } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Live" },
   { href: "/matches", label: "Matches" },
   { href: "/bets", label: "My Bets" },
-  { href: "/treasury", label: "Treasury" },
+  { href: "/treasury", label: exchangeMode ? "Exchange" : "Treasury" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/token", label: "$ODRA" },
 ];

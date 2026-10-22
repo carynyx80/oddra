@@ -5,7 +5,8 @@ import { useState } from "react";
 import type { AssetKey } from "@oddra/shared";
 import { LineChart } from "@/components/Chart";
 import { Card, CardHeader, Empty, ExtLink, Tabs } from "@/components/ui/primitives";
-import { addressUrl, deployment, txUrl, usdgSymbol } from "@/lib/config";
+import { ExchangeStats } from "@/components/ExchangeStats";
+import { addressUrl, deployment, exchangeMode, txUrl, usdgSymbol } from "@/lib/config";
 import { useTreasury, type TreasuryTotals } from "@/lib/hooks";
 import { fmtAsset, short } from "@/lib/utils";
 
@@ -29,6 +30,10 @@ function value(t: TreasuryTotals, key: (typeof ROWS)[number]["key"]): bigint {
 const signed = (v: bigint, asset: AssetKey) => (v < 0n ? `−${fmtAsset(-v, asset, false)}` : fmtAsset(v, asset, false));
 
 export default function TreasuryPage() {
+  return exchangeMode ? <ExchangeStats /> : <HouseTreasury />;
+}
+
+function HouseTreasury() {
   const t = useTreasury();
   const [chartAsset, setChartAsset] = useState<AssetKey>("USDG");
   const hist = useQuery({

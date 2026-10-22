@@ -5,12 +5,21 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAccount, useBalance, usePublicClient, useWriteContract } from "wagmi";
-import { ETH_ADDRESS, oddraBookAbi, parseAmount, type AssetKey } from "@oddra/shared";
+import type { Address } from "viem";
+import { ETH_ADDRESS, oddraBookAbi, oddraExchangeAbi, parseAmount, type AssetKey } from "@oddra/shared";
 import { explain } from "@/components/live/BetSlip";
 import { Badge, Button, Card, CardHeader, Empty, ExtLink, Stat } from "@/components/ui/primitives";
-import { addressUrl, chain, deployment, usdgSymbol } from "@/lib/config";
+import { addressUrl, chain, deployment, exchangeMode, usdgSymbol } from "@/lib/config";
+import { useMyExchange } from "@/lib/exchange";
 import { useChainNow, useMyBets, useUsdg } from "@/lib/hooks";
 import { fmtAsset, fmtUsdg, short } from "@/lib/utils";
+
+/** Self-exclusion and daily limits live on whichever contract takes the bets; both expose the same functions. */
+const RG = (
+  exchangeMode
+    ? { address: deployment.exchange!, abi: oddraExchangeAbi }
+    : { address: deployment.book, abi: oddraBookAbi }
+) as { address: Address; abi: typeof oddraBookAbi };
 
 const DURATIONS = [
   { label: "24 hours", s: 86_400 },
@@ -26,6 +35,7 @@ export default function ProfilePage() {
   const usdg = useUsdg(address);
   const eth = useBalance({ address });
   const bets = useMyBets(address);
+  const xbets = useMyExchange(address);
   const client = usePublicClient();
   const qc = useQueryClient();
   const { writeContractAsync } = useWriteContract();
@@ -40,15 +50,13 @@ export default function ProfilePage() {
     queryFn: async () => {
       const read = (functionName: "dailyLimit" | "pendingDailyLimit" | "pendingDailyLimitAt") =>
         client!.readContract({
-          address: deployment.book,
-          abi: oddraBookAbi,
+          ...RG,
           functionName,
           args: [address!, limitAddress],
         }) as Promise<bigint>;
       const [excludedUntil, dailyLimit, pendingLimit, pendingAt] = await Promise.all([
         client!.readContract({
-          address: deployment.book,
-          abi: oddraBookAbi,
+          ...RG,
           functionName: "excludedUntil",
           args: [address!],
         }) as Promise<bigint>,
@@ -83,7 +91,7 @@ export default function ProfilePage() {
       </Card>
     );
 
-  const rows = bets.data ?? [];
+  const rows = exchangeMode ? (xbets.data?.positions ?? []) : (bets.data ?? []);
   const excluded = rg.data && now !== null && rg.data.excludedUntil > now;
 
   return (
@@ -137,8 +145,7 @@ export default function ProfilePage() {
                     void send(
                       () =>
                         writeContractAsync({
-                          address: deployment.book,
-                          abi: oddraBookAbi,
+                          ...RG,
                           functionName: "selfExclude",
                           args: [BigInt(d.s)],
                         }),
@@ -152,7 +159,9 @@ export default function ProfilePage() {
             </div>
           </div>
           <div className="space-y-3">
-            <div className="label">Daily stake limit</div>
+            <div className="label">
+              {exchangeMode ? "Daily at-risk limit (stakes + liabilities)" : "Daily stake limit"}
+            </div>
             <p className="text-[13px] text-muted">
               Current:{" "}
               <span className="num text-fg">
@@ -193,8 +202,7 @@ export default function ProfilePage() {
                   void send(
                     () =>
                       writeContractAsync({
-                        address: deployment.book,
-                        abi: oddraBookAbi,
+                        ...RG,
                         functionName: "setDailyLimit",
                         args: [limitAddress, parseAmount(limit, limitAsset === "ETH" ? 18 : 6)!],
                       }),
